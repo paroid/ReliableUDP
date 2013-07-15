@@ -1,3 +1,4 @@
+#include "StdAfx.h"
 #include "ReliUDP.h"
 
 void waitForGodFather(HANDLE mutex){
@@ -227,7 +228,7 @@ unsigned __stdcall sendDataThread(LPVOID data){
 
 	//calculate timeout & sleep
 	clock_t timeoutTime=clock()+SEND_TIMEOUT+fragmentCount*SEND_TIMEOUT_FACTOR;
-	clock_t noReceiverTimeout=clock()+SEND_NORECEIVER_TIMEOUT;
+	clock_t noReceiverTimeout=clock()+SEND_NORECEIVER_TIMEOUT;	//caused by no valid receiver
 	vector<int> queue;
 	while(1){
 		queue.clear();	//let me make it clear
@@ -316,7 +317,7 @@ unsigned __stdcall sendDataThread(LPVOID data){
 			}
 		}
 		//wait for next check
-		int sleepTime=TIME_WAIT+int(TIME_WAIT_SIZE_FACTOR*(double(queue.size())/1000.0));	//sleep 
+		int sleepTime=TIME_WAIT+TIME_WAIT_SIZE_FACTOR*queue.size();	//sleep 
 		Sleep(sleepTime);
 	}	
 }

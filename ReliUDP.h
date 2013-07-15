@@ -20,12 +20,12 @@
 #define FRAGMENT_SIZE (FRAGMENT_DATA_SIZE+FRAGMENT_HEADER_SIZE)
 
 #define TIME_WAIT 24		//default 24	
-#define TIME_WAIT_SIZE_FACTOR (128*(double(FRAGMENT_DATA_SIZE)/10240.0))	//default (128*(double(FRAGMENT_DATA_SIZE)/10240.0))
+#define TIME_WAIT_SIZE_FACTOR (0.128*(double(FRAGMENT_DATA_SIZE)/10240.0))	//(0.128*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
 
 #define SEND_SAMPLE_SIZE (1024*4)		//default 4k
 
 #define SEND_TIMEOUT 3000			//default 12k
-#define SEND_TIMEOUT_FACTOR 200	//default .2k
+#define SEND_TIMEOUT_FACTOR 50	//default 200     ms/frame
 #define SEND_NORECEIVER_TIMEOUT 500	//default 500
 
 #define RECV_SEQID_BUFFER_SIZE 200	//default 200
@@ -37,7 +37,7 @@
 #define FRAGMENT_INVALID 55479
  
 #define FRAGMENT_TIMEOUT 12000	//default 12k
-#define FRAGMENT_TIMEOUT_FACTOR 2000	//default 2k
+#define FRAGMENT_TIMEOUT_FACTOR 2	//default 2ms/frame
 
 #define MUTEX_WAIT_TIMEOUT 5000		//default 5k
 
@@ -219,7 +219,7 @@ public:
 		bits=new bitSet(n);
 		bits->allSet();	//initial 0xFF
 		data=new char[dataSize];		
-		timeoutTime=clock()+ FRAGMENT_TIMEOUT +FRAGMENT_TIMEOUT_FACTOR*(n/1000);
+		timeoutTime=clock()+ FRAGMENT_TIMEOUT +FRAGMENT_TIMEOUT_FACTOR*n;
 	}
 	~recvEntry(){
 		delete bits;
@@ -230,9 +230,9 @@ public:
 	}
 public:
 	int id;	
-	clock_t timeoutTime;
 	bitSet *bits;
 	char *data;
+	clock_t timeoutTime;
 	int size;
 };
 
