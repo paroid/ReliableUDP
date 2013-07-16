@@ -16,13 +16,14 @@ void waitForGodFather(HANDLE mutex){
 	}while(res!=WAIT_OBJECT_0);	
 }
 
+#ifdef CHECK_SUM
 uint32_t calcCheckSum(ReliUDP *godFather,fragment *frame,int size){
 	frame->checkSum=0;
 	uint32_t ckcSum=godFather->crcObj.check(frame,size);
 	frame->checkSum=ckcSum;
 	return ckcSum;
 }
-
+#endif
 
 ReliUDP::ReliUDP(void)
 {
@@ -281,12 +282,14 @@ unsigned __stdcall sendDataThread(LPVOID data){
 		int lastDataSize=dataLength-(fragmentCount-1)*FRAGMENT_DATA_SIZE;
 		int lastFrameSize=lastDataSize+FRAGMENT_HEADER_SIZE;
 
-		for(int i=0;i<queue.size();i+=SendSampleInc){
+		for(size_t i=0;i<queue.size();i+=SendSampleInc){
 			if(queue[i] == fragmentCount-1){ //last piece
 				frame.fragmentID=queue[i];
 				memcpy(frame.data,dat+queue[i]*FRAGMENT_DATA_SIZE,lastDataSize);
+#ifdef CHECK_SUM
 				//checkSum
 				calcCheckSum(godFather,&frame,lastFrameSize);
+#endif
 				godFather->udpSendData((const char *)&frame,lastFrameSize);	
 #ifdef DEBUG_RS
 				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
@@ -300,8 +303,10 @@ unsigned __stdcall sendDataThread(LPVOID data){
 			else{
 				frame.fragmentID=queue[i];
 				memcpy(frame.data,dat+queue[i]*FRAGMENT_DATA_SIZE,FRAGMENT_DATA_SIZE);
+#ifdef CHECK_SUM
 				//checkSum
 				calcCheckSum(godFather,&frame,FRAGMENT_SIZE);				
+#endif
 				godFather->udpSendData((const char *)&frame,FRAGMENT_SIZE);
 #ifdef DEBUG_RS
 				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
@@ -316,7 +321,7 @@ unsigned __stdcall sendDataThread(LPVOID data){
 			}
 		}
 		//wait for next check
-		int sleepTime=TIME_WAIT+TIME_WAIT_SIZE_FACTOR*queue.size();	//sleep 
+		int sleepTime=TIME_WAIT+int(TIME_WAIT_SIZE_FACTOR*queue.size());	//sleep 
 		Sleep(sleepTime);
 	}	
 }
@@ -329,8 +334,10 @@ void ReliUDP::sendResponse(fragment *frame){
 	resFrame.messageSeqID=frame->messageSeqID;
 	resFrame.fragmentID=frame->fragmentID;	
 	resFrame.dataSize=0;	//no data
+#ifdef CHECK_SUM
 	//checkSum
 	calcCheckSum(this,&resFrame,FRAGMENT_HEADER_SIZE);
+#endif
 	udpSendData((const char *)&resFrame,FRAGMENT_HEADER_SIZE);
 }
 
@@ -362,6 +369,7 @@ unsigned __stdcall recvThread(LPVOID data){
 
 			int frameLen=getFrameLength(frame);		
 
+#ifdef CHECK_SUM
 			//checkSum
 			uint32_t checkSum=frame->checkSum;
 			uint32_t realCkcSum=calcCheckSum(godFather,frame,frameLen);
@@ -369,7 +377,7 @@ unsigned __stdcall recvThread(LPVOID data){
 			if(checkSum != realCkcSum){
 				frame->type=FRAGMENT_INVALID;	//mark as invalid fragment
 			}
-			
+#endif
 			switch(frame->type){
 			case FRAGMENT_RESPONSE:				
 #ifdef DEBUG_RS

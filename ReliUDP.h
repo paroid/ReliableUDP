@@ -14,6 +14,7 @@
 //#define DEBUG_RS
 #define MUTEX_TIMEOUT
 #define RESEND_COUNT
+#define CHECK_SUM
 
 #define FRAGMENT_DATA_SIZE (512)	//default 512
 #define FRAGMENT_HEADER_SIZE 24		
@@ -271,7 +272,7 @@ public:
 	void removeTimeout(){
 		clock_t now=clock();
 		list<recvEntry>::iterator it=indexSet.begin();
-		for(int i=0;i<indexSet.size();++i){			
+		for(size_t i=0;i<indexSet.size();++i){			
 			if(it->checkTimeout(now)){
 #ifdef DEBUG
 				cout<<"[timeout:"<<it->id<<"]"<<endl;
@@ -427,15 +428,18 @@ public:
 	void sendData(const char *dat,int dataLength,char sendOpt=SEND_BLOCK);
 	int recvData(char *buf,int dataLength);
 	void sendResponse(fragment *frame);
-	void show(){
 #ifdef RESEND_COUNT
+	void show(){
+
 		cout<<resendCount<<endl;
-#endif
 	}
+#endif
 
 	friend unsigned __stdcall recvThread(LPVOID data);
 	friend unsigned __stdcall sendDataThread(LPVOID data);
+#ifdef CHECK_SUM
 	friend uint32_t calcCheckSum(ReliUDP *godFather,fragment *frame,int size);
+#endif
 
 private:	
 	int messageSeqID;
@@ -447,7 +451,9 @@ private:
 	SOCKET sock;
 	sendStat ST;
 	recvBuffer BUF;	
+#ifdef CHECK_SUM
 	CRC32 crcObj;
+#endif
 	bool stat;
 	int dataCopyingFlag;
 	HANDLE recvThreadHandle;
