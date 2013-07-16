@@ -1,4 +1,3 @@
-#include "StdAfx.h"
 #include "ReliUDP.h"
 
 void waitForGodFather(HANDLE mutex){
