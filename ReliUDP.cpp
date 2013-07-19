@@ -1,6 +1,7 @@
+#include "stdafx.h"
 #include "ReliUDP.h"
 
-void waitForGodFather(HANDLE mutex){
+inline void waitForGodFather(HANDLE mutex){
 	DWORD res;
 #ifdef MUTEX_TIMEOUT
 	clock_t timeoutTime=clock()+MUTEX_WAIT_TIMEOUT;
@@ -17,7 +18,7 @@ void waitForGodFather(HANDLE mutex){
 }
 
 #ifdef CHECK_SUM
-uint32_t calcCheckSum(ReliUDP *godFather,fragment *frame,int size){
+inline uint32_t calcCheckSum(ReliUDP *godFather,fragment *frame,int size){
 	frame->checkSum=0;
 	uint32_t ckcSum=godFather->crcObj.check(frame,size);
 	frame->checkSum=ckcSum;
@@ -34,6 +35,7 @@ ReliUDP::ReliUDP(void)
 	stat=false;
 	sendCount=0;
 	lastSendTime=0;
+	threadNum=0;
 #ifdef RESEND_COUNT
 	resendCount=0;
 #endif
@@ -54,7 +56,7 @@ bool ReliUDP::winSockInit(){
 
 	if ( err != 0 ) //winSock Error
 		cout<<"WSAStartup Fail"<<endl;
-		return SOCK_INIT_FAIL;  
+	return SOCK_INIT_FAIL;  
 
 	if ( LOBYTE( wsaData.wVersion ) != 2 || HIBYTE( wsaData.wVersion ) != 2) {  //version check
 		WSACleanup( );  
@@ -87,7 +89,7 @@ void ReliUDP::startCom(){
 	localAddr.sin_family=AF_INET;
 	localAddr.sin_port=htons(localPort);
 	localAddr.sin_addr.S_un.S_addr=htonl(INADDR_ANY);
-	//remote
+	//remote	
 	remoteAddr.sin_family=AF_INET;
 	remoteAddr.sin_port=htons(remotePort);
 	remoteAddr.sin_addr.S_un.S_addr=inet_addr(remoteIP.data());
@@ -103,10 +105,11 @@ void ReliUDP::startCom(){
 	bufMutex=CreateMutex(NULL,FALSE,NULL);
 	sendCountMutex=CreateMutex(NULL,FALSE,NULL);
 	messageSeqIdMutex=CreateMutex(NULL,FALSE,NULL);
+	threadNumMutex=CreateMutex(NULL,FALSE,NULL);
 #ifdef RESEND_COUNT
 	resendCountMutex=CreateMutex(NULL,FALSE,NULL);
 #endif
-	if(sendMutex || sendStatMutex || bufMutex || sendCountMutex || messageSeqIdMutex)  
+	if(sendMutex || sendStatMutex || bufMutex || sendCountMutex || messageSeqIdMutex || threadNumMutex)  
 	{  
 		if(ERROR_ALREADY_EXISTS==GetLastError())  
 		{  
@@ -114,12 +117,12 @@ void ReliUDP::startCom(){
 			return;  
 		}  
 	}  
-	
+
 	//start recvThread
 	stat=true;
- 	unsigned dwThreadID;
+	unsigned dwThreadID;
 	recvThreadHandle=(HANDLE)_beginthreadex(NULL, 0, &recvThread, (LPVOID) this, 0, &dwThreadID);
-			
+
 }
 
 void ReliUDP::stopCom(){
@@ -141,6 +144,7 @@ void ReliUDP::stopCom(){
 	CloseHandle(sendCountMutex);
 	CloseHandle(bufMutex);
 	CloseHandle(messageSeqIdMutex);
+	CloseHandle(threadNumMutex);
 #ifdef RESEND_COUNT
 	CloseHandle(resendCountMutex);
 #endif
@@ -176,11 +180,20 @@ void ReliUDP::sendData(const char *dat,int dataLength,char sendOpt){
 	ReleaseMutex(sendCountMutex);
 
 	sendPara *para=new sendPara(this,dat,dataLength,messageSeqID,sendOpt);	
+	
+	if((sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK){	//unblock send threadNum check
+		waitForGodFather(threadNumMutex);
+		if(threadNum>MAX_THREAD)
+			sendOpt|=SEND_BLOCK;
+		else
+			++threadNum;
+		ReleaseMutex(threadNumMutex);
+	}
 
 	if((sendOpt&SEND_BLOCK_CHECK) == SEND_BLOCK){	//block send
 		sendDataThread(para); 
 	}
-	else{	//unblock send
+	else{	//unblock send		
 		waitForGodFather(sendMutex);
 		dataCopyingFlag=true;
 		unsigned dwThreadID;
@@ -198,45 +211,49 @@ unsigned __stdcall sendDataThread(LPVOID data){
 	sendPara *para=(sendPara *)data;
 	ReliUDP *godFather=para->godFather;
 	int dataLength=para->dataLength;
-	const char *dat;
+	const char *dat;	
 	if((para->sendOpt&SEND_BLOCK_CHECK) == SEND_BLOCK)	//block send 
 		dat=para->dat;
 	else{	//unblock send new mem
 		dat=new char[dataLength];
 		memcpy((void *)dat,para->dat,dataLength);
 		//release mutex
-		godFather->dataCopyingFlag=false;	//
+		godFather->dataCopyingFlag=false;	
 	}				
 
 	int fragmentCount=dataLength/FRAGMENT_DATA_SIZE+((dataLength%FRAGMENT_DATA_SIZE) != 0);	
-	
+
 	//the sending frame
 	fragment frame;
 	frame.type=FRAGMENT_DATA;
 	frame.messageSeqID=para->messageSeqId;	//note: this is the real messageSeqId godfather->messageSeqID maybe not !
 	frame.fragmentNum=fragmentCount;
 	frame.dataSize=dataLength;
-	
-	
+
+
 	//wait for mutex
 	waitForGodFather(godFather->sendStatMutex);
 	//set the send stat
 	godFather->ST.newSeq(&frame);
 	godFather->ST.allSet(&frame);
 	ReleaseMutex(godFather->sendStatMutex);
-	
+
 
 	//calculate timeout & sleep
 	clock_t timeoutTime=clock()+SEND_TIMEOUT+fragmentCount*SEND_TIMEOUT_FACTOR;
 	clock_t noReceiverTimeout=clock()+SEND_NORECEIVER_TIMEOUT;	//caused by no valid receiver
 	vector<int> queue;
+	uint32_t prevSize=0;
+	bool flag=false;
+	uint32_t expectedSize=0;
+	clock_t timer;
 	while(1){
 		queue.clear();	//let me make it clear
 
 		waitForGodFather(godFather->sendStatMutex);
 		//check the send stat	get all un-response frame 	
 		queue=godFather->ST.getAll(&frame);
-		
+
 		if(queue.empty()){	//all clear
 			godFather->ST.removeSeq(&frame);
 #ifdef DEBUG
@@ -245,16 +262,19 @@ unsigned __stdcall sendDataThread(LPVOID data){
 			//release mutex before return
 			ReleaseMutex(godFather->sendStatMutex);
 
-			if((para->sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK)	//unblock send -> free mem
-				delete[] dat;
-
 			waitForGodFather(godFather->sendCountMutex);
 			--godFather->sendCount;
 			ReleaseMutex(godFather->sendCountMutex);
+			if((para->sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK){
+				delete[] dat;	//unblock send -> free mem
+				waitForGodFather(godFather->threadNumMutex);
+				--godFather->threadNum;
+				ReleaseMutex(godFather->threadNumMutex);
+			}
 			delete data;		
 			return 0;
 		}
-		
+
 		//timoutCheck
 		if(clock()>timeoutTime || (queue.size()==fragmentCount && clock()>noReceiverTimeout)){
 #ifdef DEBUG
@@ -265,24 +285,38 @@ unsigned __stdcall sendDataThread(LPVOID data){
 			//release mutex before return
 			ReleaseMutex(godFather->sendStatMutex);
 
-			if((para->sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK)	//unblock send -> free mem
-				delete[] dat;
-
 			waitForGodFather(godFather->sendCountMutex);
 			--godFather->sendCount;
 			ReleaseMutex(godFather->sendCountMutex);
+			if((para->sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK){
+				delete[] dat; //unblock send -> free mem
+				waitForGodFather(godFather->threadNumMutex);
+				--godFather->threadNum;
+				ReleaseMutex(godFather->threadNumMutex);
+			}
 			delete data;			
 			return 0;
 		}		
 		ReleaseMutex(godFather->sendStatMutex);
+		
+		//esponsive send
+		expectedSize*=EXPECT_RATE;
+		flag=(queue.size()<EXPECT_EXCEPTION_SIZE || prevSize-queue.size()>=expectedSize || clock()>timer);
+		prevSize=queue.size();
+		if(!flag){
+			Sleep(5); 
+			continue; 
+		}
+		expectedSize=0;	
 
 		//send frames
-		int SendSampleInc=queue.size()/(SEND_SAMPLE_SIZE/FRAGMENT_DATA_SIZE+1)+1;	
+		int SendSampleInc=queue.size()/(SEND_SAMPLE_SIZE/FRAGMENT_SIZE+1)+1;	
 
 		int lastDataSize=dataLength-(fragmentCount-1)*FRAGMENT_DATA_SIZE;
 		int lastFrameSize=lastDataSize+FRAGMENT_HEADER_SIZE;
 
 		for(size_t i=0;i<queue.size();i+=SendSampleInc){
+			++expectedSize;	
 			if(queue[i] == fragmentCount-1){ //last piece
 				frame.fragmentID=queue[i];
 				memcpy(frame.data,dat+queue[i]*FRAGMENT_DATA_SIZE,lastDataSize);
@@ -291,6 +325,7 @@ unsigned __stdcall sendDataThread(LPVOID data){
 				calcCheckSum(godFather,&frame,lastFrameSize);
 #endif
 				godFather->udpSendData((const char *)&frame,lastFrameSize);	
+				Sleep(1);
 #ifdef DEBUG_RS
 				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
 #endif
@@ -304,10 +339,11 @@ unsigned __stdcall sendDataThread(LPVOID data){
 				frame.fragmentID=queue[i];
 				memcpy(frame.data,dat+queue[i]*FRAGMENT_DATA_SIZE,FRAGMENT_DATA_SIZE);
 #ifdef CHECK_SUM
-				//checkSum
+		
 				calcCheckSum(godFather,&frame,FRAGMENT_SIZE);				
 #endif
 				godFather->udpSendData((const char *)&frame,FRAGMENT_SIZE);
+				Sleep(1);
 #ifdef DEBUG_RS
 				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
 #endif
@@ -320,6 +356,7 @@ unsigned __stdcall sendDataThread(LPVOID data){
 
 			}
 		}
+		timer=clock()+EXPECT_TIMEOUT;
 		//wait for next check
 		int sleepTime=TIME_WAIT+int(TIME_WAIT_SIZE_FACTOR*queue.size());	//sleep 
 		Sleep(sleepTime);
@@ -373,7 +410,7 @@ unsigned __stdcall recvThread(LPVOID data){
 			//checkSum
 			uint32_t checkSum=frame->checkSum;
 			uint32_t realCkcSum=calcCheckSum(godFather,frame,frameLen);
-							
+
 			if(checkSum != realCkcSum){
 				frame->type=FRAGMENT_INVALID;	//mark as invalid fragment
 			}
@@ -416,7 +453,7 @@ unsigned __stdcall recvThread(LPVOID data){
 					if(RT.getOne(frame->messageSeqID)==-1){	//all received
 						//add messageSeqID
 						RT.addSeqId(frame);
-					
+
 						waitForGodFather(godFather->bufMutex);						
 						godFather->BUF.addEntry(RT.getDataPointer(frame->messageSeqID),frame->dataSize);						
 						ReleaseMutex(godFather->bufMutex);
@@ -427,7 +464,7 @@ unsigned __stdcall recvThread(LPVOID data){
 #endif
 					}
 				}
-				
+
 				//check recv stat to remove timeout entries
 				RT.removeTimeout();
 				break;

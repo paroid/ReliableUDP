@@ -12,35 +12,41 @@
 
 //#define DEBUG
 //#define DEBUG_RS
-#define MUTEX_TIMEOUT
+//#define MUTEX_TIMEOUT		
 #define RESEND_COUNT
 #define CHECK_SUM
 
-#define FRAGMENT_DATA_SIZE (512)	//default 512
+#define MAX_THREAD 12
+
+#define FRAGMENT_DATA_SIZE (512)		//default 512
 #define FRAGMENT_HEADER_SIZE 24		
 #define FRAGMENT_SIZE (FRAGMENT_DATA_SIZE+FRAGMENT_HEADER_SIZE)
 
-#define TIME_WAIT 24		//default 24	
-#define TIME_WAIT_SIZE_FACTOR (0.128*(double(FRAGMENT_DATA_SIZE)/10240.0))	//(0.128*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
+#define TIME_WAIT 12					//default 12	
+#define TIME_WAIT_SIZE_FACTOR (0.008*(double(FRAGMENT_DATA_SIZE)/10240.0))	//(0.008*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
 
-#define SEND_SAMPLE_SIZE (1024*4)		//default 4k
+#define SEND_SAMPLE_SIZE (1024*8)		//default 8k
 
-#define SEND_TIMEOUT 3000			//default 12k
-#define SEND_TIMEOUT_FACTOR 50	//default 200     ms/frame
-#define SEND_NORECEIVER_TIMEOUT 500	//default 500
+#define SEND_TIMEOUT 3000				//default 12k
+#define SEND_TIMEOUT_FACTOR 50			//default 200  ms/frame
+#define SEND_NORECEIVER_TIMEOUT 500		//default 500
 
-#define RECV_SEQID_BUFFER_SIZE 200	//default 200
+#define EXPECT_RATE .95					//default 95%
+#define EXPECT_TIMEOUT 32				//default 32 ms
+#define EXPECT_EXCEPTION_SIZE 12		//default 12
 
-#define RECV_BUF_WAIT 20	//default 20
+#define RECV_SEQID_BUFFER_SIZE 200		//default 200
+
+#define RECV_BUF_WAIT 20				//default 20
 
 #define FRAGMENT_DATA 17953
 #define FRAGMENT_RESPONSE 38761
 #define FRAGMENT_INVALID 55479
  
-#define FRAGMENT_TIMEOUT 12000	//default 12k
-#define FRAGMENT_TIMEOUT_FACTOR 2	//default 2ms/frame
+#define FRAGMENT_TIMEOUT 12000			//default 12k
+#define FRAGMENT_TIMEOUT_FACTOR 2		//default 2ms/frame
 
-#define MUTEX_WAIT_TIMEOUT 5000		//default 5k
+#define MUTEX_WAIT_TIMEOUT 5000			//default 5k
 
 #define ID_ERROR -2
 
@@ -56,7 +62,7 @@ using namespace std;
 typedef unsigned int uint32_t;
 
 typedef struct _fragmentST{
-	uint32_t type;	//DATA / RESPONSE / INVALID
+	uint32_t type;			//DATA / RESPONSE / INVALID
 	uint32_t messageSeqID;	
 	uint32_t fragmentID;
 	uint32_t fragmentNum;
@@ -70,7 +76,7 @@ class bitSet{
 public:
 	bitSet(int n){
 		N=n;
-		size=(N>>3)+((N&7)!=0);
+		size=(N>>3)+((N&7)!=0); //about N/8  bytes
 		dat=new char[size];
 		memset(dat,0,size);
 	}
@@ -94,7 +100,7 @@ public:
 	bool check(int pos){		
 		return pos<N ? (dat[pos>>3]&(1<<(pos&7))) != 0 : false;
 	}
-	bool bigCheck(int posB){		
+	bool bigCheck(int posB){	//check 1 byte as 8-bit ...faster than check 8 single bit
 		return posB<size ? (dat[posB]) != 0 : false;
 	}
 	int getOne(){
@@ -462,12 +468,14 @@ private:
 	HANDLE bufMutex;
 	HANDLE sendCountMutex;
 	HANDLE messageSeqIdMutex;
+	HANDLE threadNumMutex;
 #ifdef RESEND_COUNT
 	HANDLE resendCountMutex;
 	uint32_t resendCount;
 #endif
 	uint32_t sendCount;
 	clock_t lastSendTime;	
+	int threadNum;
 };
 
 typedef struct _sendThreadPara{
