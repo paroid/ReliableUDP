@@ -23,14 +23,14 @@ static const uint32_t MaxThread = 12;
 
 static const uint32_t OSBufferSize = 65536;		//OS bufferSize default 64k
 
-static const uint32_t FragmentDataSize = 512*8;		//default 512
+static const uint32_t FragmentDataSize = 512*8;		//default 512*8
 static const uint32_t FragmentHeaderSize = 24;
 static const uint32_t FragmentSize=FragmentHeaderSize+FragmentDataSize;
 
-static const uint32_t TimeWait =8.0 * double(CLOCKS_PER_SEC)/1000.0;					//default 12	
-static const uint32_t TimeWaitSizeFactor = (0.002*(double(FragmentDataSize)/10240.0))*double(CLOCKS_PER_SEC)/1000.0;	//(0.008*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
+static const uint32_t TimeWait =8.0 * double(CLOCKS_PER_SEC)/1000.0;					//default 8	
+static const uint32_t TimeWaitSizeFactor = (0.002*(double(FragmentDataSize)/10240.0))*double(CLOCKS_PER_SEC)/1000.0;	//(0.002*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
 
-static const uint32_t SendSampleSize = 1024*24;	//default 32k
+static const uint32_t SendSampleSize = 1024*24;	//default 24k
 
 static const uint32_t SendTimeout = 3000* double(CLOCKS_PER_SEC)/1000.0; //default 3k ms
 static const uint32_t SendTimeoutFactor = 50* double(CLOCKS_PER_SEC)/1000.0;  //default 50  ms/frame
