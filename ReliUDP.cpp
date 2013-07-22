@@ -1,4 +1,3 @@
-#include "stdafx.h"
 #include "ReliUDP.h"
 
 inline void waitForGodFather(HANDLE mutex){
