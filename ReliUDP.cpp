@@ -97,8 +97,12 @@ void ReliUDP::startCom(){
 		std::cout<<"Socket Error!"<<endl;
 	if(bind(sock,(sockaddr *) &localAddr,sizeof(sockaddr))<0)
 		std::cout<<"Bind Error!"<<endl;
-	//create Mutex
 
+	int buffsize = OSBufferSize; // 64k
+	setsockopt(sock, SOL_SOCKET, SO_SNDBUF,(const char *)&buffsize, sizeof(buffsize));	//set OS SEND buffer size
+	setsockopt(sock, SOL_SOCKET, SO_RCVBUF,(const char *)&buffsize, sizeof(buffsize));	//set OS RECV buffer size
+	
+	//create Mutex
 	sendMutex=CreateMutex(NULL,FALSE,NULL);
 	sendStatMutex=CreateMutex(NULL,FALSE,NULL);
 	bufMutex=CreateMutex(NULL,FALSE,NULL);
