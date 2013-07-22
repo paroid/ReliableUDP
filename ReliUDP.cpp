@@ -179,16 +179,16 @@ void ReliUDP::sendData(const char *dat,int dataLength,char sendOpt){
 	++sendCount;
 	ReleaseMutex(sendCountMutex);
 
-	sendPara *para=new sendPara(this,dat,dataLength,messageSeqID,sendOpt);	
-	
 	if((sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK){	//unblock send threadNum check
 		waitForGodFather(threadNumMutex);
-		if(threadNum>MAX_THREAD)
+		if(threadNum>MaxThread)
 			sendOpt|=SEND_BLOCK;
 		else
 			++threadNum;
 		ReleaseMutex(threadNumMutex);
 	}
+
+	sendPara *para=new sendPara(this,dat,dataLength,messageSeqID,sendOpt);	
 
 	if((sendOpt&SEND_BLOCK_CHECK) == SEND_BLOCK){	//block send
 		sendDataThread(para); 
@@ -221,7 +221,7 @@ unsigned __stdcall sendDataThread(LPVOID data){
 		godFather->dataCopyingFlag=false;	
 	}				
 
-	int fragmentCount=dataLength/FRAGMENT_DATA_SIZE+((dataLength%FRAGMENT_DATA_SIZE) != 0);	
+	int fragmentCount=dataLength/FragmentDataSize+((dataLength%FragmentDataSize) != 0);	
 
 	//the sending frame
 	fragment frame;
@@ -240,8 +240,8 @@ unsigned __stdcall sendDataThread(LPVOID data){
 
 
 	//calculate timeout & sleep
-	clock_t timeoutTime=clock()+SEND_TIMEOUT+fragmentCount*SEND_TIMEOUT_FACTOR;
-	clock_t noReceiverTimeout=clock()+SEND_NORECEIVER_TIMEOUT;	//caused by no valid receiver
+	clock_t timeoutTime=clock()+SendTimeout+fragmentCount*SendTimeoutFactor;
+	clock_t noReceiverTimeout=clock()+SendNoReceiverTimeout;	//caused by no valid receiver
 	vector<int> queue;
 	uint32_t prevSize=0;
 	bool flag=false;
@@ -299,27 +299,26 @@ unsigned __stdcall sendDataThread(LPVOID data){
 		}		
 		ReleaseMutex(godFather->sendStatMutex);
 		
-		//esponsive send
-		expectedSize*=EXPECT_RATE;
-		flag=(queue.size()<EXPECT_EXCEPTION_SIZE || prevSize-queue.size()>=expectedSize || clock()>timer);
+		//responsive send
+		expectedSize*=ExpectRate;
+		flag=(queue.size()<ExpectExceptionSize || prevSize-queue.size()>=expectedSize || clock()>timer);
 		prevSize=queue.size();
-		if(!flag){
+		if(!flag){	//do not resend
 			Sleep(5); 
 			continue; 
 		}
 		expectedSize=0;	
-
 		//send frames
-		int SendSampleInc=queue.size()/(SEND_SAMPLE_SIZE/FRAGMENT_SIZE+1)+1;	
+		int SendSampleInc=queue.size()/(SendSampleSize/FragmentSize+1)+1;	
 
-		int lastDataSize=dataLength-(fragmentCount-1)*FRAGMENT_DATA_SIZE;
-		int lastFrameSize=lastDataSize+FRAGMENT_HEADER_SIZE;
+		int lastDataSize=dataLength-(fragmentCount-1)*FragmentDataSize;
+		int lastFrameSize=lastDataSize+FragmentHeaderSize;
 
 		for(size_t i=0;i<queue.size();i+=SendSampleInc){
 			++expectedSize;	
 			if(queue[i] == fragmentCount-1){ //last piece
 				frame.fragmentID=queue[i];
-				memcpy(frame.data,dat+queue[i]*FRAGMENT_DATA_SIZE,lastDataSize);
+				memcpy(frame.data,dat+queue[i]*FragmentDataSize,lastDataSize);
 #ifdef CHECK_SUM
 				//checkSum
 				calcCheckSum(godFather,&frame,lastFrameSize);
@@ -337,12 +336,12 @@ unsigned __stdcall sendDataThread(LPVOID data){
 			}
 			else{
 				frame.fragmentID=queue[i];
-				memcpy(frame.data,dat+queue[i]*FRAGMENT_DATA_SIZE,FRAGMENT_DATA_SIZE);
+				memcpy(frame.data,dat+queue[i]*FragmentDataSize,FragmentDataSize);
 #ifdef CHECK_SUM
 		
-				calcCheckSum(godFather,&frame,FRAGMENT_SIZE);				
+				calcCheckSum(godFather,&frame,FragmentSize);				
 #endif
-				godFather->udpSendData((const char *)&frame,FRAGMENT_SIZE);
+				godFather->udpSendData((const char *)&frame,FragmentSize);
 				Sleep(1);
 #ifdef DEBUG_RS
 				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
@@ -356,9 +355,9 @@ unsigned __stdcall sendDataThread(LPVOID data){
 
 			}
 		}
-		timer=clock()+EXPECT_TIMEOUT;
+		timer=clock()+ExpectTimeout;
 		//wait for next check
-		int sleepTime=TIME_WAIT+int(TIME_WAIT_SIZE_FACTOR*queue.size());	//sleep 
+		int sleepTime=TimeWait+int(TimeWaitSizeFactor*queue.size());	//sleep 
 		Sleep(sleepTime);
 	}	
 }
@@ -373,17 +372,17 @@ void ReliUDP::sendResponse(fragment *frame){
 	resFrame.dataSize=0;	//no data
 #ifdef CHECK_SUM
 	//checkSum
-	calcCheckSum(this,&resFrame,FRAGMENT_HEADER_SIZE);
+	calcCheckSum(this,&resFrame,FragmentHeaderSize);
 #endif
-	udpSendData((const char *)&resFrame,FRAGMENT_HEADER_SIZE);
+	udpSendData((const char *)&resFrame,FragmentHeaderSize);
 }
 
 int getFrameLength(fragment *frame){
 	switch(frame->type){
 	case FRAGMENT_RESPONSE:
-		return FRAGMENT_HEADER_SIZE;		
+		return FragmentHeaderSize;		
 	case FRAGMENT_DATA:
-		return frame->fragmentID == frame->fragmentNum-1 ? FRAGMENT_HEADER_SIZE+frame->dataSize-(frame->fragmentNum-1)*FRAGMENT_DATA_SIZE :FRAGMENT_SIZE;		
+		return frame->fragmentID == frame->fragmentNum-1 ? FragmentHeaderSize+frame->dataSize-(frame->fragmentNum-1)*FragmentDataSize :FragmentSize;		
 	default:
 		frame->type=FRAGMENT_INVALID;
 		return 0;
@@ -393,7 +392,7 @@ int getFrameLength(fragment *frame){
 
 unsigned __stdcall recvThread(LPVOID data){
 	ReliUDP *godFather=(ReliUDP *)data;
-	const int bufSize=FRAGMENT_SIZE;	//Data Content + Header
+	const int bufSize=FragmentSize;	//Data Content + Header
 	char buf[bufSize];	
 	int recvLen,dataLen;	
 	fragment *frame;	//to form a frame
@@ -401,7 +400,7 @@ unsigned __stdcall recvThread(LPVOID data){
 
 	while(godFather->stat){	//check service stat
 		recvLen=godFather->udpRecvData(buf,bufSize);
-		if(recvLen>=FRAGMENT_HEADER_SIZE){	//basic requirement to be a ReliUDP frame
+		if(recvLen>=FragmentHeaderSize){	//basic requirement to be a ReliUDP frame
 			frame=(fragment *)buf;		//let's recognize it as a frame
 
 			int frameLen=getFrameLength(frame);		
@@ -444,7 +443,7 @@ unsigned __stdcall recvThread(LPVOID data){
 					RT.newSeq(frame);
 				}
 				//let's do it
-				dataLen=frameLen-FRAGMENT_HEADER_SIZE;
+				dataLen=frameLen-FragmentHeaderSize;
 
 				if(RT.check(frame)){ //make sure this frame hasn't been received
 					RT.storeData(frame,dataLen);	//storeData & set Bit
@@ -482,9 +481,13 @@ unsigned __stdcall recvThread(LPVOID data){
 
 int ReliUDP::recvData(char *buf,int dataLength){
 	while(BUF.empty())
-		Sleep(RECV_BUF_WAIT);
+		Sleep(RecvBUFWait);
 	waitForGodFather(bufMutex);	
 	int ret=BUF.popEntry(buf);
 	ReleaseMutex(bufMutex);
 	return ret;
+}
+
+uint32_t ReliUDP::getNextDataLength(){
+	return BUF.getHeadSize();
 }

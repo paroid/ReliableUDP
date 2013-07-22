@@ -13,40 +13,43 @@
 //#define DEBUG
 //#define DEBUG_RS
 //#define MUTEX_TIMEOUT		
-#define RESEND_COUNT
+
+//#define RESEND_COUNT
 #define CHECK_SUM
 
-#define MAX_THREAD 12
+typedef unsigned int uint32_t;
 
-#define FRAGMENT_DATA_SIZE (512)		//default 512
-#define FRAGMENT_HEADER_SIZE 24		
-#define FRAGMENT_SIZE (FRAGMENT_DATA_SIZE+FRAGMENT_HEADER_SIZE)
+static const uint32_t MaxThread = 12;
 
-#define TIME_WAIT 12					//default 12	
-#define TIME_WAIT_SIZE_FACTOR (0.008*(double(FRAGMENT_DATA_SIZE)/10240.0))	//(0.008*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
+static const uint32_t FragmentDataSize = 512;		//default 512
+static const uint32_t FragmentHeaderSize = 24;
+static const uint32_t FragmentSize=FragmentHeaderSize+FragmentDataSize;
 
-#define SEND_SAMPLE_SIZE (1024*8)		//default 8k
+static const uint32_t TimeWait =12.0 * double(CLOCKS_PER_SEC)/1000.0;					//default 12	
+static const uint32_t TimeWaitSizeFactor = (0.008*(double(FragmentDataSize)/10240.0))*double(CLOCKS_PER_SEC)/1000.0;	//(0.008*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
 
-#define SEND_TIMEOUT 3000				//default 12k
-#define SEND_TIMEOUT_FACTOR 50			//default 200  ms/frame
-#define SEND_NORECEIVER_TIMEOUT 500		//default 500
+static const uint32_t SendSampleSize = 1024*8;	//default 8k
 
-#define EXPECT_RATE .95					//default 95%
-#define EXPECT_TIMEOUT 32				//default 32 ms
-#define EXPECT_EXCEPTION_SIZE 12		//default 12
+static const uint32_t SendTimeout = 3000* double(CLOCKS_PER_SEC)/1000.0; //default 3k ms
+static const uint32_t SendTimeoutFactor = 50* double(CLOCKS_PER_SEC)/1000.0;  //default 50  ms/frame
+static const uint32_t SendNoReceiverTimeout = 500*double(CLOCKS_PER_SEC)/1000.0;	//default 500 ms
 
-#define RECV_SEQID_BUFFER_SIZE 200		//default 200
+static const double ExpectRate = .95; 	//default 95%
+static const uint32_t ExpectTimeout = 32*double(CLOCKS_PER_SEC)/1000.0;		//default 32 ms
+static const uint32_t ExpectExceptionSize = 12;		//default 12
 
-#define RECV_BUF_WAIT 20				//default 20
+static const uint32_t RecvSeqIDBufferSize = 200; //default 200
+
+static const uint32_t RecvBUFWait =20*double(CLOCKS_PER_SEC)/1000.0; //default 20ms
+
+static const uint32_t FragmentTimeout = 12000*double(CLOCKS_PER_SEC)/1000.0; //default 12k ms
+static const uint32_t FragmentTimeoutFactor = 2*double(CLOCKS_PER_SEC)/1000.0;		//default 2ms/frame
+static const uint32_t MutexWaitTimeout = 5000*double(CLOCKS_PER_SEC)/1000.0; //default 5k ms
 
 #define FRAGMENT_DATA 17953
 #define FRAGMENT_RESPONSE 38761
 #define FRAGMENT_INVALID 55479
- 
-#define FRAGMENT_TIMEOUT 12000			//default 12k
-#define FRAGMENT_TIMEOUT_FACTOR 2		//default 2ms/frame
 
-#define MUTEX_WAIT_TIMEOUT 5000			//default 5k
 
 #define ID_ERROR -2
 
@@ -59,7 +62,6 @@
 
 using namespace std;
 
-typedef unsigned int uint32_t;
 
 typedef struct _fragmentST{
 	uint32_t type;			//DATA / RESPONSE / INVALID
@@ -68,7 +70,7 @@ typedef struct _fragmentST{
 	uint32_t fragmentNum;
 	uint32_t dataSize;
 	uint32_t checkSum;
-	char data[FRAGMENT_DATA_SIZE];	
+	char data[FragmentDataSize];	
 }fragment;
 
 
@@ -226,7 +228,7 @@ public:
 		bits=new bitSet(n);
 		bits->allSet();	//initial 0xFF
 		data=new char[dataSize];		
-		timeoutTime=clock()+ FRAGMENT_TIMEOUT +FRAGMENT_TIMEOUT_FACTOR*n;
+		timeoutTime=clock()+ FragmentTimeout +FragmentTimeoutFactor*n;
 	}
 	~recvEntry(){
 		delete bits;
@@ -256,7 +258,7 @@ public:
 	}	
 	void addSeqId(fragment *frame){
 		receivedSeqSet.push_back(frame->messageSeqID);
-		if(receivedSeqSet.size()>RECV_SEQID_BUFFER_SIZE)	//buffer overflow remove head
+		if(receivedSeqSet.size()>RecvSeqIDBufferSize)	//buffer overflow remove head
 			receivedSeqSet.erase(receivedSeqSet.begin());
 	}	
 	bool checkSeqId(fragment *frame){
@@ -310,7 +312,7 @@ public:
 	void storeData(fragment *frame,int dataLen){
 		list<recvEntry>::iterator it=find(frame->messageSeqID);
 		if(it != indexSet.end()){
-			memcpy((it->data)+(frame->fragmentID*FRAGMENT_DATA_SIZE),frame->data,dataLen);	
+			memcpy((it->data)+(frame->fragmentID*FragmentDataSize),frame->data,dataLen);	
 			it->bits->reset(frame->fragmentID);	//reset mark as received
 		}
 	}	
@@ -356,9 +358,12 @@ public:
 		memcpy(des,data,dataLength);
 		return dataLength;
 	}
+	uint32_t getLen(){
+		return dataLength;
+	} 
 private:
 	char *data;
-	int dataLength;
+	uint32_t dataLength;
 };
 
 class recvBuffer{
@@ -385,6 +390,9 @@ public:
 	void clear(){
 		queue<bufEntry> empty;
 		swap(empty,indexSet);
+	}
+	uint32_t getHeadSize(){
+		return indexSet.empty()? 0 : indexSet.front().getLen();
 	}
 
 private:
@@ -434,6 +442,7 @@ public:
 	void sendData(const char *dat,int dataLength,char sendOpt=SEND_BLOCK);
 	int recvData(char *buf,int dataLength);
 	void sendResponse(fragment *frame);
+	uint32_t getNextDataLength();
 #ifdef RESEND_COUNT
 	void show(){
 
@@ -475,7 +484,7 @@ private:
 #endif
 	uint32_t sendCount;
 	clock_t lastSendTime;	
-	int threadNum;
+	uint32_t threadNum;
 };
 
 typedef struct _sendThreadPara{
