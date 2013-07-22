@@ -254,25 +254,12 @@ unsigned __stdcall sendDataThread(LPVOID data){
 		//check the send stat	get all un-response frame 	
 		queue=godFather->ST.getAll(&frame);
 
+		bool over=false;
 		if(queue.empty()){	//all clear
-			godFather->ST.removeSeq(&frame);
 #ifdef DEBUG
 			cout<<"[send complete: "<<frame.messageSeqID<<"]"<<endl;
 #endif
-			//release mutex before return
-			ReleaseMutex(godFather->sendStatMutex);
-
-			waitForGodFather(godFather->sendCountMutex);
-			--godFather->sendCount;
-			ReleaseMutex(godFather->sendCountMutex);
-			if((para->sendOpt&SEND_BLOCK_CHECK) == SEND_UNBLOCK){
-				delete[] dat;	//unblock send -> free mem
-				waitForGodFather(godFather->threadNumMutex);
-				--godFather->threadNum;
-				ReleaseMutex(godFather->threadNumMutex);
-			}
-			delete data;		
-			return 0;
+			over=true;
 		}
 
 		//timoutCheck
@@ -280,8 +267,9 @@ unsigned __stdcall sendDataThread(LPVOID data){
 #ifdef DEBUG
 			cout<<"[Send Abort]"<<endl;
 #endif
-			godFather->ST.removeSeq(&frame);	
-
+			over=true;
+		}
+		if(over){
 			//release mutex before return
 			ReleaseMutex(godFather->sendStatMutex);
 
@@ -316,44 +304,31 @@ unsigned __stdcall sendDataThread(LPVOID data){
 
 		for(size_t i=0;i<queue.size();i+=SendSampleInc){
 			++expectedSize;	
-			if(queue[i] == fragmentCount-1){ //last piece
-				frame.fragmentID=queue[i];
-				memcpy(frame.data,dat+queue[i]*FragmentDataSize,lastDataSize);
+			frame.fragmentID=queue[i];
+
+			int dataSize=FragmentDataSize;
+			int frameSize=FragmentSize;
+			if(queue[i] == fragmentCount-1){ //last one
+				dataSize=lastDataSize;
+				frameSize=lastFrameSize;
+			}
+
+			memcpy(frame.data,dat+queue[i]*FragmentDataSize,dataSize);
 #ifdef CHECK_SUM
-				//checkSum
-				calcCheckSum(godFather,&frame,lastFrameSize);
+			//checkSum
+			calcCheckSum(godFather,&frame,frameSize);
 #endif
-				godFather->udpSendData((const char *)&frame,lastFrameSize);	
-				Sleep(1);
+			godFather->udpSendData((const char *)&frame,frameSize);	
+			Sleep(1);
+
 #ifdef DEBUG_RS
-				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
+			cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
 #endif
 #ifdef RESEND_COUNT
-				waitForGodFather(godFather->resendCountMutex);
-				++godFather->resendCount;
-				ReleaseMutex(godFather->resendCountMutex);
+			waitForGodFather(godFather->resendCountMutex);
+			++godFather->resendCount;
+			ReleaseMutex(godFather->resendCountMutex);
 #endif
-			}
-			else{
-				frame.fragmentID=queue[i];
-				memcpy(frame.data,dat+queue[i]*FragmentDataSize,FragmentDataSize);
-#ifdef CHECK_SUM
-		
-				calcCheckSum(godFather,&frame,FragmentSize);				
-#endif
-				godFather->udpSendData((const char *)&frame,FragmentSize);
-				Sleep(1);
-#ifdef DEBUG_RS
-				cout<<"[resend: -->>] "<<frame.messageSeqID<<"--"<<frame.fragmentID<<endl;
-#endif
-
-#ifdef RESEND_COUNT
-				waitForGodFather(godFather->resendCountMutex);
-				++godFather->resendCount;
-				ReleaseMutex(godFather->resendCountMutex);
-#endif
-
-			}
 		}
 		timer=clock()+ExpectTimeout;
 		//wait for next check
