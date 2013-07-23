@@ -19,34 +19,34 @@
 
 typedef unsigned int uint32_t;
 
-static const uint32_t MaxThread = 12;
+static const int MaxThread = 12;
 
-static const uint32_t OSBufferSize = 65536;		//OS bufferSize default 64k
+static const int OSBufferSize = 65536;		//OS bufferSize default 64k
 
-static const uint32_t FragmentDataSize = 512 * 8;		//default 512*8
-static const uint32_t FragmentHeaderSize = 24;
-static const uint32_t FragmentSize = FragmentHeaderSize + FragmentDataSize;
+static const int FragmentDataSize = 512 * 8;		//default 512*8
+static const int FragmentHeaderSize = 24;
+static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
-static const uint32_t TimeWait = 8.0 * double(CLOCKS_PER_SEC) / 1000.0;					//default 8
-static const uint32_t TimeWaitSizeFactor = (0.002 * (double(FragmentDataSize) / 10240.0)) * double(CLOCKS_PER_SEC) / 1000.0;	//(0.002*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
+static const int TimeWait = int(8.0 * double(CLOCKS_PER_SEC) / 1000.0);					//default 8
+static const int TimeWaitSizeFactor = int((0.002 * (double(FragmentDataSize) / 10240.0)) * double(CLOCKS_PER_SEC) / 1000.0);	//(0.002*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
 
-static const uint32_t SendSampleSize = 1024 * 24;	//default 24k
+static const int SendSampleSize = 1024 * 24;	//default 24k
 
-static const uint32_t SendTimeout = 3000 * double(CLOCKS_PER_SEC) / 1000.0; //default 3k ms
-static const uint32_t SendTimeoutFactor = 50 * double(CLOCKS_PER_SEC) / 1000.0; //default 50  ms/frame
-static const uint32_t SendNoReceiverTimeout = 500 * double(CLOCKS_PER_SEC) / 1000.0;	//default 500 ms
+static const int SendTimeout = int(3000 * double(CLOCKS_PER_SEC) / 1000.0); //default 3k ms
+static const int SendTimeoutFactor = int(50 * double(CLOCKS_PER_SEC) / 1000.0); //default 50  ms/frame
+static const int SendNoReceiverTimeout = int(500 * double(CLOCKS_PER_SEC) / 1000.0);	//default 500 ms
 
 static const double ExpectRate = .99; 	//default 99%
-static const uint32_t ExpectTimeout = 32 * double(CLOCKS_PER_SEC) / 1000.0;		//default 32 ms
-static const uint32_t ExpectExceptionSize = 12;		//default 12
+static const int ExpectTimeout = int(32 * double(CLOCKS_PER_SEC) / 1000.0);		//default 32 ms
+static const int ExpectExceptionSize = 12;		//default 12
 
-static const uint32_t RecvSeqIDBufferSize = 200; //default 200
+static const int RecvSeqIDBufferSize = 200; //default 200
 
-static const uint32_t RecvBUFWait = 20 * double(CLOCKS_PER_SEC) / 1000.0; //default 20ms
+static const int RecvBUFWait = int(20 * double(CLOCKS_PER_SEC) / 1000.0); //default 20ms
 
-static const uint32_t FragmentTimeout = 12000 * double(CLOCKS_PER_SEC) / 1000.0; //default 12k ms
-static const uint32_t FragmentTimeoutFactor = 2 * double(CLOCKS_PER_SEC) / 1000.0;		//default 2ms/frame
-static const uint32_t MutexWaitTimeout = 5000 * double(CLOCKS_PER_SEC) / 1000.0; //default 5k ms
+static const int FragmentTimeout = int(12000 * double(CLOCKS_PER_SEC) / 1000.0); //default 12k ms
+static const int FragmentTimeoutFactor = int(2 * double(CLOCKS_PER_SEC) / 1000.0);		//default 2ms/frame
+static const int MutexWaitTimeout = int(5000 * double(CLOCKS_PER_SEC) / 1000.0); //default 5k ms
 
 #define FRAGMENT_DATA 17953
 #define FRAGMENT_RESPONSE 38761
