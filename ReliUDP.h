@@ -437,7 +437,7 @@ public:
     ReliUDP(void);
     ~ReliUDP(void);
     bool winSockInit();
-    void setLocalPort(int port);
+    void setLocalAddr(string ip, int port);
     void setRemoteAddr(string ip, int port);
     void setTempRemoteAddr(string ip, int port);
     void startCom();
@@ -469,6 +469,7 @@ private:
     SOCKADDR_IN localAddr;
     SOCKADDR_IN remoteAddr;
     int localPort;
+    string localIP;
     int remotePort;
     string remoteIP;
     SOCKET sock;

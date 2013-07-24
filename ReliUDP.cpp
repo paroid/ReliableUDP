@@ -61,7 +61,8 @@ bool ReliUDP::winSockInit() {
     return SOCK_INIT_OK;
 }
 
-void ReliUDP::setLocalPort(int port) {
+void ReliUDP::setLocalAddr(string ip, int port) {
+    localIP = ip;
     localPort = port;
 }
 
@@ -83,7 +84,8 @@ void ReliUDP::startCom() {
     //local
     localAddr.sin_family = AF_INET;
     localAddr.sin_port = htons(localPort);
-    localAddr.sin_addr.S_un.S_addr = htonl(INADDR_ANY);
+    localAddr.sin_addr.S_un.S_addr = inet_addr(localIP.data());
+    //localAddr.sin_addr.S_un.S_addr = htonl(INADDR_ANY);
     //remote
     remoteAddr.sin_family = AF_INET;
     remoteAddr.sin_port = htons(remotePort);
@@ -115,12 +117,13 @@ void ReliUDP::startCom() {
     stat = true;
     unsigned dwThreadID;
     recvThreadHandle = (HANDLE)_beginthreadex(NULL, 0, &recvThread, (LPVOID) this, 0, &dwThreadID);
+    //reset Communication
     resetCom();
 }
 
 void ReliUDP::resetCom() {
     resetWaitFlag = true;
-    int waitTime = 8;
+    int waitTime = 4;
     do {
         sendReset();
         Sleep(50);
@@ -135,8 +138,8 @@ void ReliUDP::stopCom() {
     stat = false;
     char sign[9] = "shutdown";
     setTempRemoteAddr("127.0.0.1", localPort);
-    //sleep !important
     while(1) {
+        //sleep !important
         Sleep(50);
         udpSendData(sign, 9);
         //check recv thread stat
@@ -284,7 +287,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             --godFather->sendCount;
             ReleaseMutex(godFather->sendCountMutex);
             if((para->sendOpt & SEND_BLOCK_CHECK) == SEND_UNBLOCK) {
-                delete[] dat; //unblock send -> free mem
+                delete[] (char *)dat; //unblock send -> free mem
                 waitForGodFather(godFather->threadNumMutex);
                 --godFather->threadNum;
                 ReleaseMutex(godFather->threadNumMutex);
@@ -398,7 +401,7 @@ unsigned __stdcall recvThread(LPVOID data) {
     recvStat RT;	//recv stat
     while(godFather->stat) {	//check service stat
         recvLen = godFather->udpRecvData(buf, bufSize);
-        if(recvLen >= (int)FragmentHeaderSize) {	//basic requirement to be a ReliUDP frame
+        if(recvLen >= FragmentHeaderSize) {	//basic requirement to be a ReliUDP frame
             frame = (fragment *)buf;		//let's recognize it as a frame
             int frameLen = getFrameLength(frame);
 #ifdef CHECK_SUM
