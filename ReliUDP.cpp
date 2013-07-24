@@ -85,7 +85,6 @@ void ReliUDP::startCom() {
     localAddr.sin_family = AF_INET;
     localAddr.sin_port = htons(localPort);
     localAddr.sin_addr.S_un.S_addr = inet_addr(localIP.data());
-    //localAddr.sin_addr.S_un.S_addr = htonl(INADDR_ANY);
     //remote
     remoteAddr.sin_family = AF_INET;
     remoteAddr.sin_port = htons(remotePort);
@@ -128,7 +127,7 @@ void ReliUDP::resetCom() {
         sendReset();
         Sleep(50);
     }
-    while(waitTime-- && resetWaitFlag);
+    while(resetWaitFlag && waitTime--);
 }
 
 void ReliUDP::stopCom() {
