@@ -117,8 +117,6 @@ void ReliUDP::startCom() {
 }
 
 void ReliUDP::resetCom(SOCKADDR_IN addr) {
-    if(!ST.haveIPort(getIPort(addr))) //not my client no need to reset
-        return;
     resetWaitFlag = true;
     int waitTime = 8;
     do {
