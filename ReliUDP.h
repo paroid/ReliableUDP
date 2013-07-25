@@ -9,11 +9,6 @@
 #include <time.h>
 #include <Windows.h>
 
-//#define DEBUG
-//#define DEBUG_RS
-//#define MUTEX_TIMEOUT
-
-//#define RESEND_COUNT
 #define CHECK_SUM
 
 typedef unsigned int uint32_t;

@@ -161,8 +161,7 @@ void ReliUDP::clearCom() {
 }
 
 void ReliUDP::udpSendData(const char *dat, int dataLength, SOCKADDR_IN addr) {
-    int a;
-    if((a = sendto(sock, dat, dataLength, 0, (sockaddr *)&addr, sizeof(sockaddr)) ) < 0) {
+    if(sendto(sock, dat, dataLength, 0, (sockaddr *)&addr, sizeof(sockaddr)) < 0) {
 #ifdef DEBUG
         std::cout << "Send Error: " << WSAGetLastError() << endl;
 #endif
