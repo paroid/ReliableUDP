@@ -26,10 +26,22 @@ inline uint32_t calcCheckSum(ReliUDP *godFather, fragment *frame, int size) {
 }
 #endif
 
+uint32_t getIPort(const SOCKADDR_IN addr) {
+    return uint32_t((addr.sin_addr.S_un.S_addr & 0xffff0000) | addr.sin_port);
+}
+
+SOCKADDR_IN ReliUDP::getAddr(string ip, int port) {
+    SOCKADDR_IN addr;
+    memset(&addr, 0, sizeof(SOCKADDR_IN));
+    addr.sin_family = AF_INET;
+    addr.sin_addr.S_un.S_addr = inet_addr(ip.data());
+    addr.sin_port = htons(port);
+    return addr;
+}
+
 ReliUDP::ReliUDP(void) {
     winSockInit();
     memset(&localAddr, 0, sizeof(localAddr));
-    memset(&remoteAddr, 0, sizeof(remoteAddr));
     messageSeqID = 0;
     stat = false;
     sendCount = 0;
@@ -66,16 +78,6 @@ void ReliUDP::setLocalAddr(string ip, int port) {
     localPort = port;
 }
 
-void ReliUDP::setRemoteAddr(string ip, int port) {
-    remoteIP = ip;
-    remotePort = port;
-}
-
-void ReliUDP::setTempRemoteAddr(string ip, int port) {
-    remoteAddr.sin_family = AF_INET;
-    remoteAddr.sin_port = htons(port);
-    remoteAddr.sin_addr.S_un.S_addr = inet_addr(ip.data());
-}
 
 
 void ReliUDP::startCom() {
@@ -85,10 +87,6 @@ void ReliUDP::startCom() {
     localAddr.sin_family = AF_INET;
     localAddr.sin_port = htons(localPort);
     localAddr.sin_addr.S_un.S_addr = inet_addr(localIP.data());
-    //remote
-    remoteAddr.sin_family = AF_INET;
-    remoteAddr.sin_port = htons(remotePort);
-    remoteAddr.sin_addr.S_un.S_addr = inet_addr(remoteIP.data());
     if((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
         std::cout << "Socket Error!" << endl;
     if(bind(sock, (sockaddr *) &localAddr, sizeof(sockaddr)) < 0)
@@ -116,15 +114,13 @@ void ReliUDP::startCom() {
     stat = true;
     unsigned dwThreadID;
     recvThreadHandle = (HANDLE)_beginthreadex(NULL, 0, &recvThread, (LPVOID) this, 0, &dwThreadID);
-    //reset Communication
-    resetCom();
 }
 
-void ReliUDP::resetCom() {
+void ReliUDP::resetCom(SOCKADDR_IN addr) {
     resetWaitFlag = true;
-    int waitTime = 4;
+    int waitTime = 8;
     do {
-        sendReset();
+        sendReset(addr);
         Sleep(50);
     }
     while(resetWaitFlag && waitTime--);
@@ -136,11 +132,10 @@ void ReliUDP::stopCom() {
         Sleep(20);
     stat = false;
     char sign[9] = "shutdown";
-    setTempRemoteAddr("127.0.0.1", localPort);
     while(1) {
         //sleep !important
         Sleep(50);
-        udpSendData(sign, 9);
+        udpSendData(sign, 9, getAddr("127.0.0.1", localPort));
         //check recv thread stat
         DWORD res = WaitForSingleObject(recvThreadHandle, 0);
         if(res == WAIT_OBJECT_0)
@@ -165,37 +160,30 @@ void ReliUDP::clearCom() {
     WSACleanup();
 }
 
-void ReliUDP::udpSendData(const char *dat, int dataLength) {
-    if(sendto(sock, dat, dataLength, 0, (sockaddr *) &remoteAddr, sizeof(sockaddr)) < 0) {
+void ReliUDP::udpSendData(const char *dat, int dataLength, SOCKADDR_IN addr) {
+    int a;
+    if((a = sendto(sock, dat, dataLength, 0, (sockaddr *)&addr, sizeof(sockaddr)) ) < 0) {
 #ifdef DEBUG
         std::cout << "Send Error: " << WSAGetLastError() << endl;
 #endif
     }
 }
 
-int ReliUDP::udpRecvData(char *buf, int dataLength) {
-    int res;
-    SOCKADDR_IN tmpRemoteAddr;
-    //only receive data from remote IP:port
-    do {
-        res = sizeof(sockaddr);
-        if((res = recvfrom(sock, buf, dataLength, 0, (sockaddr *)&tmpRemoteAddr, &res)) < 0) {
+int ReliUDP::udpRecvData(char *buf, int dataLength, SOCKADDR_IN *addr) {
+    int res = sizeof(sockaddr);
+    if((res = recvfrom(sock, buf, dataLength, 0, (sockaddr *)addr, &res)) < 0) {
 #ifdef DEBUG
-            std::cout << "Recv Error: " << WSAGetLastError() << endl;
+        std::cout << "Recv Error: " << WSAGetLastError() << endl;
 #endif
-        }
-        if(!strcmp(buf, "shutdown")) //exception for stopCom [shutdown MSG]
-            break;
     }
-    while(tmpRemoteAddr.sin_port != htons(remotePort) || tmpRemoteAddr.sin_addr.S_un.S_addr != inet_addr(remoteIP.data()));
     return res;
 }
 
 
-void ReliUDP::sendData(const char *dat, int dataLength, char sendOpt) {
+void ReliUDP::sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt) {
     waitForGodFather(messageSeqIdMutex);
     //here inc messageSeqID
-    ++messageSeqID;
+    uint32_t seqID = ST.getIPortSeq(getIPort(addr));
     ReleaseMutex(messageSeqIdMutex);
     waitForGodFather(sendCountMutex);
     ++sendCount;
@@ -208,7 +196,7 @@ void ReliUDP::sendData(const char *dat, int dataLength, char sendOpt) {
             ++threadNum;
         ReleaseMutex(threadNumMutex);
     }
-    sendPara *para = new sendPara(this, dat, dataLength, messageSeqID, sendOpt);
+    sendPara *para = new sendPara(this, dat, dataLength, seqID, addr, sendOpt);
     if((sendOpt & SEND_BLOCK_CHECK) == SEND_BLOCK) {	//block send
         sendDataThread(para);
     }
@@ -243,12 +231,14 @@ unsigned __stdcall sendDataThread(LPVOID data) {
     //the sending frame
     fragment frame;
     frame.type = FRAGMENT_DATA;
+    frame.IPort = getIPort(para->addr);	//IPort tmp remote Addr for easy ST op
     frame.messageSeqID = para->messageSeqId;	//note: this is the real messageSeqId godfather->messageSeqID maybe not !
     frame.fragmentNum = fragmentCount;
     frame.dataSize = dataLength;
     //wait for mutex
     waitForGodFather(godFather->sendStatMutex);
     //set the send stat
+    //cout<<"addST:"<<frame.IPort<<"|"<<frame.messageSeqID<<endl;
     godFather->ST.newSeq(&frame);
     godFather->ST.allSet(&frame);
     ReleaseMutex(godFather->sendStatMutex);
@@ -264,6 +254,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         queue.clear();	//let me make it clear
         waitForGodFather(godFather->sendStatMutex);
         //check the send stat	get all un-response frame
+        frame.IPort = getIPort(para->addr); //set tmp addr
         queue = godFather->ST.getAll(&frame);
         bool over = false;
         if(queue.empty()) {	//all clear
@@ -305,6 +296,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         }
         expectedSize = 0;
         //send frames
+        frame.IPort = getIPort(godFather->localAddr); //use local iport to send data
         int SendSampleInc = queue.size() / (SendSampleSize / FragmentSize + 1) + 1;
         int lastDataSize = dataLength - (fragmentCount - 1) * FragmentDataSize;
         int lastFrameSize = lastDataSize + FragmentHeaderSize;
@@ -322,7 +314,8 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             //checkSum
             calcCheckSum(godFather, &frame, frameSize);
 #endif
-            godFather->udpSendData((const char *)&frame, frameSize);
+            //
+            godFather->udpSendData((const char *)&frame, frameSize, para->addr);
             Sleep(1);
 #ifdef DEBUG_RS
             cout << "[resend: -->>] " << frame.messageSeqID << "--" << frame.fragmentID << endl;
@@ -340,32 +333,35 @@ unsigned __stdcall sendDataThread(LPVOID data) {
     }
 }
 
-void ReliUDP::sendReset() {
+void ReliUDP::sendReset(SOCKADDR_IN addr) {
     fragment resFrame;
     resFrame.type = FRAGMENT_RESET;
+    resFrame.IPort = getIPort(localAddr);
     resFrame.dataSize = 0;	//no data
 #ifdef CHECK_SUM
     //checkSum
     calcCheckSum(this, &resFrame, FragmentHeaderSize);
 #endif
-    udpSendData((const char *)&resFrame, FragmentHeaderSize);
+    udpSendData((const char *)&resFrame, FragmentHeaderSize, addr);
 }
 
-void ReliUDP::sendResetResponse() {
+void ReliUDP::sendResetResponse(SOCKADDR_IN addr) {
     fragment resFrame;
     resFrame.type = FRAGMENT_RESET_RESPONSE;
+    resFrame.IPort = getIPort(localAddr);
     resFrame.dataSize = 0;	//no data
 #ifdef CHECK_SUM
     //checkSum
     calcCheckSum(this, &resFrame, FragmentHeaderSize);
 #endif
-    udpSendData((const char *)&resFrame, FragmentHeaderSize);
+    udpSendData((const char *)&resFrame, FragmentHeaderSize, addr);
 }
 
-void ReliUDP::sendResponse(fragment *frame) {
+void ReliUDP::sendResponse(fragment *frame, SOCKADDR_IN addr) {
     //the response frame
     fragment resFrame;
     resFrame.type = FRAGMENT_RESPONSE;
+    resFrame.IPort = getIPort(localAddr);
     resFrame.messageSeqID = frame->messageSeqID;
     resFrame.fragmentID = frame->fragmentID;
     resFrame.dataSize = 0;	//no data
@@ -373,7 +369,7 @@ void ReliUDP::sendResponse(fragment *frame) {
     //checkSum
     calcCheckSum(this, &resFrame, FragmentHeaderSize);
 #endif
-    udpSendData((const char *)&resFrame, FragmentHeaderSize);
+    udpSendData((const char *)&resFrame, FragmentHeaderSize, addr);
 }
 
 int getFrameLength(fragment *frame) {
@@ -398,8 +394,9 @@ unsigned __stdcall recvThread(LPVOID data) {
     int recvLen, dataLen;
     fragment *frame;	//to form a frame
     recvStat RT;	//recv stat
+    SOCKADDR_IN tmpRemoteAddr;
     while(godFather->stat) {	//check service stat
-        recvLen = godFather->udpRecvData(buf, bufSize);
+        recvLen = godFather->udpRecvData(buf, bufSize, &tmpRemoteAddr);
         if(recvLen >= FragmentHeaderSize) {	//basic requirement to be a ReliUDP frame
             frame = (fragment *)buf;		//let's recognize it as a frame
             int frameLen = getFrameLength(frame);
@@ -422,8 +419,8 @@ unsigned __stdcall recvThread(LPVOID data) {
                     ReleaseMutex(godFather->sendStatMutex);
                     break;
                 case FRAGMENT_RESET:
-                    RT.clearSeqSet();	//clear SEQ buffer Set to reset
-                    godFather->sendResetResponse();	//send response
+                    RT.clearSeqSet(frame);	//clear SEQ buffer Set to reset
+                    godFather->sendResetResponse(tmpRemoteAddr);	//send response
                     break;
                 case FRAGMENT_RESET_RESPONSE:
                     godFather->resetWaitFlag = false; //reset RESET flag
@@ -433,13 +430,13 @@ unsigned __stdcall recvThread(LPVOID data) {
                     cout << "[recv: ----] " << frame->messageSeqID << "--" << frame->fragmentID << endl;
 #endif
                     //whatever sender needs a response
-                    godFather->sendResponse(frame);
+                    godFather->sendResponse(frame, tmpRemoteAddr);
                     //check duplicate message
                     if(RT.checkSeqId(frame)) {	//duplicate message
                         //do nothing
                         break;
                     }
-                    if(!RT.have(frame->messageSeqID)) {	//new entry
+                    if(!RT.have(frame)) {	//new entry
                         RT.newSeq(frame);
                     }
                     //let's do it
@@ -447,13 +444,13 @@ unsigned __stdcall recvThread(LPVOID data) {
                     if(RT.check(frame)) { //make sure this frame hasn't been received
                         RT.storeData(frame, dataLen);	//storeData & set Bit
                         //check if all received
-                        if(RT.getOne(frame->messageSeqID) == -1) {	//all received
+                        if(RT.getOne(frame) == -1) {	//all received
                             //add messageSeqID
                             RT.addSeqId(frame);
                             waitForGodFather(godFather->bufMutex);
-                            godFather->BUF.addEntry(RT.getDataPointer(frame->messageSeqID), frame->dataSize);
+                            godFather->BUF.addEntry(RT.getDataPointer(frame), frame->dataSize, tmpRemoteAddr);
                             ReleaseMutex(godFather->bufMutex);
-                            RT.removeSeq(frame->messageSeqID);
+                            RT.removeSeq(frame);
 #ifdef DEBUG
                             cout << "[ID:" << frame->messageSeqID << " received]" << endl;
 #endif
@@ -474,11 +471,11 @@ unsigned __stdcall recvThread(LPVOID data) {
 }
 
 
-int ReliUDP::recvData(char *buf, int dataLength) {
+int ReliUDP::recvData(char *buf, int dataLength, SOCKADDR_IN *addr) {
     while(BUF.empty())
         Sleep(RecvBUFWait);
     waitForGodFather(bufMutex);
-    int ret = BUF.popEntry(buf);
+    int ret = BUF.popEntry(buf, addr);
     ReleaseMutex(bufMutex);
     return ret;
 }

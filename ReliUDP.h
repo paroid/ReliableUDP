@@ -9,7 +9,6 @@
 #include <time.h>
 #include <Windows.h>
 
-
 //#define DEBUG
 //#define DEBUG_RS
 //#define MUTEX_TIMEOUT
@@ -24,7 +23,7 @@ static const int MaxThread = 12;
 static const int OSBufferSize = 65536;		//OS bufferSize default 64k
 
 static const int FragmentDataSize = 512 * 8;		//default 512*8
-static const int FragmentHeaderSize = 24;
+static const int FragmentHeaderSize = 28;
 static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
 static const int TimeWait = int(8.0 * double(CLOCKS_PER_SEC) / 1000.0);					//default 8
@@ -40,9 +39,9 @@ static const double ExpectRate = .99; 	//default 99%
 static const int ExpectTimeout = int(32 * double(CLOCKS_PER_SEC) / 1000.0);		//default 32 ms
 static const int ExpectExceptionSize = 12;		//default 12
 
-static const int RecvSeqIDBufferSize = 200; //default 200
+static const int RecvSeqIDBufferSize = 320; //default 200
 
-static const int RecvBUFWait = int(20 * double(CLOCKS_PER_SEC) / 1000.0); //default 20ms
+static const int RecvBUFWait = int(5 * double(CLOCKS_PER_SEC) / 1000.0); //default 5ms
 
 static const int FragmentTimeout = int(12000 * double(CLOCKS_PER_SEC) / 1000.0); //default 12k ms
 static const int FragmentTimeoutFactor = int(2 * double(CLOCKS_PER_SEC) / 1000.0);		//default 2ms/frame
@@ -69,6 +68,7 @@ using namespace std;
 
 typedef struct _fragmentST {
     uint32_t type;			//DATA / RESPONSE / INVALID
+    uint32_t IPort;			//IP & Port  :x.xx.xxx.xxxx:pp =>xxx.xxxx:pp [16+16]
     uint32_t messageSeqID;
     uint32_t fragmentID;
     uint32_t fragmentNum;
@@ -77,6 +77,12 @@ typedef struct _fragmentST {
     char data[FragmentDataSize];
 } fragment;
 
+static void addrCopy(SOCKADDR_IN *dst, const SOCKADDR_IN src) {
+    memset(dst, 0, sizeof(SOCKADDR_IN));
+    dst->sin_family = src.sin_family;
+    dst->sin_addr.S_un.S_addr = src.sin_addr.S_un.S_addr;
+    dst->sin_port = src.sin_port;
+}
 
 class bitSet {
 public:
@@ -143,90 +149,130 @@ private:
 
 class statEntry {
 public:
-    statEntry(int i, int n) {
+    statEntry(uint32_t iport, int i, int n) {
+        IPort = iport;
         id = i;
         bits = new bitSet(n);
     }
     ~statEntry() {
         delete bits;
     }
+    uint32_t IPort;
     int id;
     bitSet *bits;
 };
 
+class IPortSeq {
+public:
+    IPortSeq(uint32_t iport, uint32_t seq) {
+        IPort = iport;
+        SeqID = seq;
+    }
+    uint32_t IPort;
+    uint32_t SeqID;
+};
 
 class sendStat {
 public:
     sendStat() {
         indexSet.clear();
+        seqIndex.clear();
     }
     ~sendStat() {
         indexSet.clear();
+        seqIndex.clear();
     }
-    list<statEntry>::iterator find(int id) {
+    list<statEntry>::iterator find(fragment *frame) {
         for(list<statEntry>::iterator it = indexSet.begin(); it != indexSet.end(); ++it) {
-            if(it->id == id)
+            if(it->IPort == frame->IPort && it->id == frame->messageSeqID)
                 return it;
         }
         return indexSet.end();
     }
     void newSeq(fragment *frame) {
-        list<statEntry>::iterator it = find(frame->messageSeqID);
+        list<statEntry>::iterator it = find(frame);
         if(it == indexSet.end()) {
-            statEntry *entry = new statEntry(frame->messageSeqID, frame->fragmentNum);
+            statEntry *entry = new statEntry(frame->IPort, frame->messageSeqID, frame->fragmentNum);
             indexSet.push_back(*entry);
         }
     }
     void set(fragment *frame) {
-        list<statEntry>::iterator it = find(frame->messageSeqID);
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             it->bits->set(frame->fragmentID);
     }
     void reset(fragment *frame) {
-        list<statEntry>::iterator it = find(frame->messageSeqID);
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             it->bits->reset(frame->fragmentID);
     }
     void allSet(fragment *frame) {
-        list<statEntry>::iterator it = find(frame->messageSeqID);
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             it->bits->allSet();
     }
-    void allReset(int id) {
-        list<statEntry>::iterator it = find(id);
+    void allReset(fragment *frame) {
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             it->bits->allReset();
     }
-    int getOne(int id) {
-        list<statEntry>::iterator it = find(id);
+    int getOne(fragment *frame) {
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             return it->bits->getOne();
         return ID_ERROR;
     }
     vector<int> getAll(fragment *frame) {
-        list<statEntry>::iterator it = find(frame->messageSeqID);
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             return it->bits->getAll();
         vector<int> empty;
         return empty;
     }
     void removeSeq(fragment *frame) {
-        list<statEntry>::iterator it = find(frame->messageSeqID);
+        list<statEntry>::iterator it = find(frame);
         if(it != indexSet.end()) {
             indexSet.erase(it);
         }
     }
 
+    list<IPortSeq>::iterator findSeq(uint32_t iport) {
+        for(list<IPortSeq>::iterator it = seqIndex.begin(); it != seqIndex.end(); ++it) {
+            if(it->IPort == iport)
+                return it;
+        }
+        return seqIndex.end();
+    }
+    bool haveIPort(uint32_t iport) {
+        return findSeq(iport) != seqIndex.end();
+    }
+    void newIPortSeq(uint32_t iport) {
+        IPortSeq *entry = new IPortSeq(iport, 1);
+        seqIndex.push_back(*entry);
+    }
+
+    uint32_t getIPortSeq(uint32_t iport) {
+        list<IPortSeq>::iterator it = findSeq(iport);
+        if(it != seqIndex.end()) {
+            return ++it->SeqID;
+        }
+        else {
+            newIPortSeq(iport);
+            return 1;
+        }
+    }
+
 private:
     list<statEntry> indexSet;
-
+    list<IPortSeq> seqIndex;
 };
 
 
 
 class recvEntry {
 public:
-    recvEntry(int i, int n, int dataSize) {
+    recvEntry(uint32_t iport, int i, int n, int dataSize) {
+        IPort = iport;
         id = i;
         size = n;
         bits = new bitSet(n);
@@ -242,6 +288,7 @@ public:
         return now > timeoutTime || now + 1200000 < timeoutTime;	//obvious timoutOut or overflow => timeout
     }
 public:
+    uint32_t IPort;
     int id;
     bitSet *bits;
     char *data;
@@ -261,25 +308,26 @@ public:
         receivedSeqSet.clear();
     }
     void addSeqId(fragment *frame) {
-        receivedSeqSet.push_back(frame->messageSeqID);
+        IPortSeq *entry = new IPortSeq(frame->IPort, frame->messageSeqID);
+        receivedSeqSet.push_back(*entry);
         if(receivedSeqSet.size() > RecvSeqIDBufferSize)	//buffer overflow remove head
             receivedSeqSet.erase(receivedSeqSet.begin());
     }
     bool checkSeqId(fragment *frame) {
-        for(list<uint32_t>::iterator it = receivedSeqSet.begin(); it != receivedSeqSet.end(); ++it)
-            if(*it == frame->messageSeqID)
+        for(list<IPortSeq>::iterator it = receivedSeqSet.begin(); it != receivedSeqSet.end(); ++it)
+            if(it->IPort == frame->IPort && it->SeqID == frame->messageSeqID)
                 return true;
         return false;
     }
-    list<recvEntry>::iterator find(int id) {
+    list<recvEntry>::iterator find(fragment *frame) {
         for(list<recvEntry>::iterator it = indexSet.begin(); it != indexSet.end(); ++it) {
-            if(it->id == id)
+            if(it->IPort == frame->IPort && it->id == frame->messageSeqID)
                 return it;
         }
         return indexSet.end();
     }
-    bool have(int id) {
-        return find(id) != indexSet.end();
+    bool have(fragment *frame) {
+        return find(frame) != indexSet.end();
     }
     void removeTimeout() {
         clock_t now = clock();
@@ -300,53 +348,64 @@ public:
         }
     }
     void newSeq(fragment *frame) {
-        list<recvEntry>::iterator it = find(frame->messageSeqID);
+        list<recvEntry>::iterator it = find(frame);
         if(it == indexSet.end()) {
-            recvEntry *entry = new recvEntry(frame->messageSeqID, frame->fragmentNum, frame->dataSize);
+            recvEntry *entry = new recvEntry(frame->IPort, frame->messageSeqID, frame->fragmentNum, frame->dataSize);
             indexSet.push_back(*entry);
         }
     }
     bool check(fragment *frame) {
-        list<recvEntry>::iterator it = find(frame->messageSeqID);
+        list<recvEntry>::iterator it = find(frame);
         if(it != indexSet.end()) {
             return it->bits->check(frame->fragmentID);
         }
         return false;
     }
     void storeData(fragment *frame, int dataLen) {
-        list<recvEntry>::iterator it = find(frame->messageSeqID);
+        list<recvEntry>::iterator it = find(frame);
         if(it != indexSet.end()) {
             memcpy((it->data) + (frame->fragmentID * FragmentDataSize), frame->data, dataLen);
             it->bits->reset(frame->fragmentID);	//reset mark as received
         }
     }
-    const char* getDataPointer(int id) {
-        list<recvEntry>::iterator it = find(id);
+    const char* getDataPointer(fragment *frame) {
+        list<recvEntry>::iterator it = find(frame);
         if(it != indexSet.end()) {
             return it->data;
         }
         return NULL;
     }
-    int getOne(int id) {
-        list<recvEntry>::iterator it = find(id);
+    int getOne(fragment *frame) {
+        list<recvEntry>::iterator it = find(frame);
         if(it != indexSet.end())
             return it->bits->getOne();
         return ID_ERROR;
     }
-    void removeSeq(int id) {
-        list<recvEntry>::iterator it = find(id);
+    void removeSeq(fragment *frame) {
+        list<recvEntry>::iterator it = find(frame);
         if(it != indexSet.end()) {
             indexSet.erase(it);
         }
     }
-    void clearSeqSet() {
-        receivedSeqSet.clear();
+    void clearSeqSet(fragment *frame) {
+        list<IPortSeq>::iterator it = receivedSeqSet.begin();
+        for(size_t i = 0; i < receivedSeqSet.size(); ++i) {
+            if(it->IPort == frame->IPort) {
+                receivedSeqSet.erase(it);
+                it = receivedSeqSet.begin();
+                int t = i;
+                while(t--)	++it;
+                --i;
+            }
+            else
+                ++it;
+        }
     }
 
 
 private:
     list<recvEntry> indexSet;
-    list<uint32_t> receivedSeqSet;
+    list<IPortSeq> receivedSeqSet;
 };
 
 class bufEntry {
@@ -358,11 +417,13 @@ public:
     ~bufEntry() {
         delete[] data;
     }
-    void storeData(const char *src, int dataLen) {
+    void storeData(const char *src, int dataLen, SOCKADDR_IN add) {
         memcpy(data, src, dataLen);
+        addrCopy(&addr, add);
     }
-    int popData(char *des) {
+    int popData(char *des, SOCKADDR_IN *addr) {
         memcpy(des, data, dataLength);
+        addrCopy(addr, this->addr);
         return dataLength;
     }
     uint32_t getLen() {
@@ -371,6 +432,7 @@ public:
 private:
     char *data;
     uint32_t dataLength;
+    SOCKADDR_IN addr;
 };
 
 class recvBuffer {
@@ -384,13 +446,13 @@ public:
     bool empty() {
         return indexSet.empty();
     }
-    void addEntry(const char *src, int datalen) {
+    void addEntry(const char *src, int datalen, SOCKADDR_IN add) {
         bufEntry *entry = new bufEntry(datalen);
-        entry->storeData(src, datalen);
+        entry->storeData(src, datalen, add);
         indexSet.push(*entry);
     }
-    int popEntry(char *des) {
-        int len = indexSet.front().popData(des);
+    int popEntry(char *des, SOCKADDR_IN *addr) {
+        int len = indexSet.front().popData(des, addr);
         indexSet.pop();
         return len;
     }
@@ -438,20 +500,19 @@ public:
     ~ReliUDP(void);
     bool winSockInit();
     void setLocalAddr(string ip, int port);
-    void setRemoteAddr(string ip, int port);
-    void setTempRemoteAddr(string ip, int port);
     void startCom();
     void stopCom();
     void clearCom();
-    void udpSendData(const char *dat, int dataLength);
-    int udpRecvData(char *buf, int dataLength);
-    void sendData(const char *dat, int dataLength, char sendOpt = SEND_BLOCK);
-    int recvData(char *buf, int dataLength);
-    void sendResponse(fragment *frame);
-    void sendReset();
-    void sendResetResponse();
-    void resetCom();
+    void udpSendData(const char *dat, int dataLength, SOCKADDR_IN addr);
+    int udpRecvData(char *buf, int dataLength, SOCKADDR_IN *addr);
+    void sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt = SEND_BLOCK);
+    int recvData(char *buf, int dataLength, SOCKADDR_IN *addr);
+    void sendResponse(fragment *frame, SOCKADDR_IN addr);
+    void sendReset(SOCKADDR_IN addr);
+    void sendResetResponse(SOCKADDR_IN addr);
+    void resetCom(SOCKADDR_IN addr);
     uint32_t getNextDataLength();
+    static SOCKADDR_IN getAddr(string ip, int port);
 #ifdef RESEND_COUNT
     void show() {
         cout << resendCount << endl;
@@ -467,11 +528,8 @@ public:
 private:
     int messageSeqID;
     SOCKADDR_IN localAddr;
-    SOCKADDR_IN remoteAddr;
     int localPort;
     string localIP;
-    int remotePort;
-    string remoteIP;
     SOCKET sock;
     sendStat ST;
     recvBuffer BUF;
@@ -498,17 +556,19 @@ private:
 };
 
 typedef struct _sendThreadPara {
-    _sendThreadPara(ReliUDP *father, const char *d, uint32_t len, uint32_t id, char opt) {
+    _sendThreadPara(ReliUDP *father, const char *d, uint32_t len, uint32_t id, SOCKADDR_IN add, char opt) {
         godFather = father;
         dat = d;
         dataLength = len;
         messageSeqId = id;
         sendOpt = opt;
+        addrCopy(&addr, add);
     }
     ReliUDP *godFather;
     const char *dat;
     uint32_t dataLength;
     uint32_t messageSeqId;
+    SOCKADDR_IN addr;
     char sendOpt;
 } sendPara;
 
