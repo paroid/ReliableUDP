@@ -29,7 +29,6 @@ SOCKADDR_IN ReliUDP::getAddr(string ip, int port) {
 ReliUDP::ReliUDP(void) {
     winSockInit();
     memset(&localAddr, 0, sizeof(localAddr));
-    messageSeqID = 0;
     stat = false;
     sendCount = 0;
     threadNum = 0;
@@ -148,7 +147,7 @@ void ReliUDP::udpSendData(const char *dat, int dataLength, SOCKADDR_IN addr) {
     timeout.tv_usec = 0;
     FD_ZERO(&writeFD);
     FD_SET(sock, &writeFD);
-    int ret = select(0, NULL, &writeFD, NULL, &timeout);
+    int ret = select(sock + 1, NULL, &writeFD, NULL, &timeout);
     if(ret <= 0)	//error or send block
         return;
     if(sendto(sock, dat, dataLength, 0, (sockaddr *)&addr, sizeof(sockaddr)) < 0) {
@@ -165,7 +164,7 @@ int ReliUDP::udpRecvData(char *buf, int dataLength, SOCKADDR_IN *addr) {
     timeout.tv_usec = 0;
     FD_ZERO(&readFD);
     FD_SET(sock, &readFD);
-    int ret = select(0, &readFD, NULL, NULL, &timeout);
+    int ret = select(sock + 1, &readFD, NULL, NULL, &timeout);
     if(ret <= 0)	//error or no data to read
         return 0;
     int res = sizeof(sockaddr);
@@ -264,6 +263,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             over = true;
         }
         if(over) {
+            godFather->ST.removeSeq(&frame);	//remove seq from SEND_STAT
             LeaveCriticalSection(&godFather->sendStatMutex);
             EnterCriticalSection(&godFather->sendCountMutex);
             --godFather->sendCount;
