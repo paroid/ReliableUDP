@@ -92,13 +92,20 @@ void ReliUDP::startCom() {
     InitializeCriticalSection(&sendCountMutex);
     InitializeCriticalSection(&messageSeqIdMutex);
     InitializeCriticalSection(&threadNumMutex);
+    InitializeCriticalSection(&recvStatMutex);
 #ifdef RESEND_COUNT
     InitializeCriticalSection(&resendCountMutex);
 #endif
     //start recvThread
     stat = true;
     unsigned dwThreadID;
-    recvThreadHandle = (HANDLE)_beginthreadex(NULL, 0, &recvThread, (LPVOID) this, 0, &dwThreadID);
+    for(int i = 0; i < recvThreadNum; ++i) {
+        recvThreadHandle[i] = (HANDLE)_beginthreadex(NULL, 0, &recvThread, (LPVOID) this, 0, &dwThreadID);
+        if(recvThreadHandle[i] == 0) {
+            cout << "create recv Thread Error" << endl;
+            return;
+        }
+    }
 }
 
 void ReliUDP::resetCom(SOCKADDR_IN addr) {
@@ -116,10 +123,12 @@ void ReliUDP::stopCom() {
     while(sendCount)
         Sleep(20);
     stat = false;
-    while(1) {
-        DWORD res = WaitForSingleObject(recvThreadHandle, 0);
-        if(res == WAIT_OBJECT_0)
-            break;
+    for(int i = 0; i < recvThreadNum; ++i) {
+        while(1) {
+            DWORD res = WaitForSingleObject(recvThreadHandle[i], 0);
+            if(res == WAIT_OBJECT_0)
+                break;
+        }
     }
     //delete critical section
     DeleteCriticalSection(&sendMutex);
@@ -384,7 +393,6 @@ unsigned __stdcall recvThread(LPVOID data) {
     char buf[bufSize];
     int recvLen, dataLen;
     fragment *frame;	//to form a frame
-    recvStat RT;	//recv stat
     SOCKADDR_IN tmpRemoteAddr;
     int timeCnt = 0;
     while(godFather->stat) {	//check service stat
@@ -411,7 +419,9 @@ unsigned __stdcall recvThread(LPVOID data) {
                     LeaveCriticalSection(&godFather->sendStatMutex);
                     break;
                 case FRAGMENT_RESET:
-                    RT.clearSeqSet(frame);	//clear SEQ buffer Set to reset
+                    EnterCriticalSection(&godFather->recvStatMutex);
+                    godFather->RT.clearSeqSet(frame);	//clear SEQ buffer Set to reset
+                    LeaveCriticalSection(&godFather->recvStatMutex);
                     godFather->sendResetResponse(tmpRemoteAddr);	//send response
                     break;
                 case FRAGMENT_RESET_RESPONSE:
@@ -423,33 +433,34 @@ unsigned __stdcall recvThread(LPVOID data) {
 #endif
                     //whatever sender needs a response
                     godFather->sendResponse(frame, tmpRemoteAddr);
+                    EnterCriticalSection(&godFather->recvStatMutex);
                     //check duplicate message
-                    if(RT.checkSeqId(frame)) {	//duplicate message
+                    if(godFather->RT.checkSeqId(frame)) {	//duplicate message
                         //do nothing
+                        LeaveCriticalSection(&godFather->recvStatMutex);
                         break;
                     }
-                    if(!RT.have(frame)) {	//new entry
-                        RT.newSeq(frame);
+                    if(!godFather->RT.have(frame)) {	//new entry
+                        godFather->RT.newSeq(frame);
                     }
                     //let's do it
                     dataLen = frameLen - FragmentHeaderSize;
-                    if(RT.check(frame)) { //make sure this frame hasn't been received
-                        RT.storeData(frame, dataLen);	//storeData & set Bit
+                    if(godFather->RT.check(frame)) { //make sure this frame hasn't been received
+                        godFather->RT.storeData(frame, dataLen);	//storeData & set Bit
                         //check if all received
-                        if(RT.getOne(frame) == -1) {	//all received
+                        if(godFather->RT.getOne(frame) == -1) {	//all received
                             //add messageSeqID
-                            RT.addSeqId(frame);
+                            godFather->RT.addSeqId(frame);
                             EnterCriticalSection(&godFather->bufMutex);
-                            godFather->BUF.addEntry(RT.getDataPointer(frame), frame->dataSize, tmpRemoteAddr);
+                            godFather->BUF.addEntry(godFather->RT.getDataPointer(frame), frame->dataSize, tmpRemoteAddr);
                             LeaveCriticalSection(&godFather->bufMutex);
-                            RT.removeSeq(frame);
+                            godFather->RT.removeSeq(frame);
 #ifdef DEBUG
                             cout << "[ID:" << frame->messageSeqID << " received]" << endl;
 #endif
                         }
                     }
-                    //check recv stat to remove timeout entries
-                    //RT.removeTimeout();
+                    LeaveCriticalSection(&godFather->recvStatMutex);
                     break;
                 case FRAGMENT_INVALID:	//do nothing
 #ifdef DEBUG
@@ -457,8 +468,11 @@ unsigned __stdcall recvThread(LPVOID data) {
 #endif
                     break;
             }
-            if(!((timeCnt++) & 0xff)) //256 recv => 1 remove
-                RT.removeTimeout();
+            if(!((timeCnt++) & 0xff)) { //256 recv => 1 remove
+                EnterCriticalSection(&godFather->recvStatMutex);
+                godFather->RT.removeTimeout();
+                LeaveCriticalSection(&godFather->recvStatMutex);
+            }
         }
     }
     return 0;

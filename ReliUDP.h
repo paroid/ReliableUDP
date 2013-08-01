@@ -15,11 +15,12 @@
 typedef unsigned int uint32_t;
 typedef unsigned short uint16_t;
 
-static const int MaxThread = 12;
+static const int MaxThread = 12;				//default 12
+static const int recvThreadNum = 4;				//default 4
 
-static const int OSBufferSize = 65536;		//OS bufferSize default 64k
+static const int OSBufferSize = 65536;			//OS bufferSize default 64k
 
-static const int FragmentDataSize = 512 * 8;		//default 512*8
+static const int FragmentDataSize = 512 * 8;	//default 512*8
 static const int FragmentHeaderSize = 20;
 static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
@@ -28,22 +29,22 @@ static const int TimeWaitSizeFactor = int((0.002 * double(FragmentDataSize) / 10
 
 static const int SendSampleSize = 1024 * 24;	//default 24k
 
-static const int SendTimeout = 3000; //default 3k ms
-static const int SendTimeoutFactor = 50; //default 50  ms/frame
-static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 1000.0);	//default 1 s
+static const int SendTimeout = 3000;			//default 3k ms
+static const int SendTimeoutFactor = 50;		//default 50  ms/frame
+static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 1000.0);		//default 1 s
 
-static const double ExpectRate = .99; 	//default 99%
-static const int ExpectTimeout = 32;		//default 32 ms
+static const double ExpectRate = .99; 			//default 99%
+static const int ExpectTimeout = 32;			//default 32 ms
 static const int ExpectExceptionSize = 12;		//default 12
 
-static const int RecvSeqIDBufferSize = 320; //default 200
+static const int RecvSeqIDBufferSize = 320;		//default 200
 
-static const int RecvBUFWait = 50; //default 5ms
+static const int RecvBUFWait = 50;				//default 5ms
 
-static const int FragmentTimeout = 3000; //default 3k ms
+static const int FragmentTimeout = 3000;		//default 3k ms
 static const int FragmentTimeoutFactor = 2;		//default 2ms/frame
 
-static const int selectTimeoutTime = 1;
+static const int selectTimeoutTime = 1;			//default 1s
 
 #define FRAGMENT_DATA 7953
 #define FRAGMENT_RESPONSE 8761
@@ -529,6 +530,7 @@ private:
     string localIP;
     SOCKET sock;
     sendStat ST;
+    recvStat RT;
     recvBuffer BUF;
 #ifdef CHECK_SUM
     CRC32 crcObj;
@@ -536,13 +538,14 @@ private:
     bool stat;
     bool dataCopyingFlag;
     bool resetWaitFlag;
-    HANDLE recvThreadHandle;
+    HANDLE recvThreadHandle[recvThreadNum];
     CRITICAL_SECTION sendMutex;
     CRITICAL_SECTION sendStatMutex;
     CRITICAL_SECTION bufMutex;
     CRITICAL_SECTION sendCountMutex;
     CRITICAL_SECTION messageSeqIdMutex;
     CRITICAL_SECTION threadNumMutex;
+    CRITICAL_SECTION recvStatMutex;
 #ifdef RESEND_COUNT
     CRITICAL_SECTION resendCountMutex;
     uint16_t resendCount;
