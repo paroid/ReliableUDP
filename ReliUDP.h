@@ -10,9 +10,9 @@
 #include <time.h>
 #include <Windows.h>
 
-
 #define CHECK_SUM
 
+typedef unsigned char uint8_t;			//8-bit
 typedef unsigned short uint16_t;		//16-bit
 typedef unsigned int uint32_t;			//32-bit
 
@@ -22,7 +22,10 @@ static const int recvThreadNum = 3;				//default 3
 static const int OSBufferSize = 65536;			//OS bufferSize default 64k
 
 static const int FragmentDataSize = 4096;		//default 4k
-static const int FragmentHeaderSize = 16;		//header 16
+static const int FragmentHeaderSize = 12;		//header 16
+static const int responseSize = 6;
+static const int resetSize = 2;
+static const int minPacketSize = resetSize;
 static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
 static const int TimeWait = 8 ;					//default 8
@@ -47,11 +50,11 @@ static const int FragmentTimeoutFactor = 2;		//default 2ms/frame
 
 static const int selectTimeoutTime = 1;			//default 1s
 
-#define FRAGMENT_DATA 7953
-#define FRAGMENT_RESPONSE 8761
-#define FRAGMENT_INVALID 5479
-#define FRAGMENT_RESET 4913
-#define FRAGMENT_RESET_RESPONSE 9481
+#define FRAGMENT_DATA 73
+#define FRAGMENT_RESPONSE 81
+#define FRAGMENT_INVALID 59
+#define FRAGMENT_RESET 43
+#define FRAGMENT_RESET_RESPONSE 91
 
 
 #define ID_ERROR -2
@@ -67,12 +70,12 @@ using namespace std;
 
 
 typedef struct _fragmentST {
-    uint16_t type;			//DATA / RESPONSE / RESET / RESET_RESPONSE / INVALID
+    uint8_t type;			//DATA / RESPONSE / RESET / RESET_RESPONSE / INVALID
+    uint8_t checkSum;
     uint16_t messageSeqID;
     uint16_t fragmentID;
-    uint16_t fragmentNum;
+    uint16_t fragmentNum;	//max 2^16
     uint32_t dataSize;
-    uint32_t checkSum;
     char data[FragmentDataSize];
 } fragment;
 
@@ -485,12 +488,17 @@ public:
             crc32Lookup[i] = crc;
         }
     }
-    uint32_t check(const void* data, size_t length, uint32_t previousCrc32 = 0) {
+    uint8_t check(const void* data, size_t length, uint32_t previousCrc32 = 0) {
         uint32_t crc = ~previousCrc32;
         unsigned char* current = (unsigned char*) data;
         while(length--)
             crc = (crc >> 8) ^ crc32Lookup[(crc & 0xFF) ^ *current++];
-        return ~crc;
+        uint8_t res = crc;
+        for(int i = 0; i < 3; ++i) {
+            crc >>= 8;
+            res ^= crc;
+        }
+        return res;
     }
 private:
     uint32_t crc32Lookup[256];

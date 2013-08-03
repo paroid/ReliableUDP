@@ -342,48 +342,44 @@ unsigned __stdcall sendDataThread(LPVOID data) {
 void ReliUDP::sendReset(SOCKADDR_IN addr) {
     fragment resFrame;
     resFrame.type = FRAGMENT_RESET;
-    //resFrame.IPort = getIPort(localAddr);
-    resFrame.dataSize = 0;	//no data
 #ifdef CHECK_SUM
     //checkSum
-    calcCheckSum(this, &resFrame, FragmentHeaderSize);
+    calcCheckSum(this, &resFrame, resetSize);
 #endif
-    udpSendData((const char *)&resFrame, FragmentHeaderSize, addr);
+    udpSendData((const char *)&resFrame, resetSize, addr);
 }
 
 void ReliUDP::sendResetResponse(SOCKADDR_IN addr) {
     fragment resFrame;
     resFrame.type = FRAGMENT_RESET_RESPONSE;
-    //resFrame.IPort = getIPort(localAddr);
-    resFrame.dataSize = 0;	//no data
 #ifdef CHECK_SUM
     //checkSum
-    calcCheckSum(this, &resFrame, FragmentHeaderSize);
+    calcCheckSum(this, &resFrame, resetSize);
 #endif
-    udpSendData((const char *)&resFrame, FragmentHeaderSize, addr);
+    udpSendData((const char *)&resFrame, resetSize, addr);
 }
 
 void ReliUDP::sendResponse(fragment *frame, SOCKADDR_IN addr) {
     //the response frame
     fragment resFrame;
     resFrame.type = FRAGMENT_RESPONSE;
-    //resFrame.IPort = getIPort(localAddr);
     resFrame.messageSeqID = frame->messageSeqID;
     resFrame.fragmentID = frame->fragmentID;
-    resFrame.dataSize = 0;	//no data
 #ifdef CHECK_SUM
     //checkSum
-    calcCheckSum(this, &resFrame, FragmentHeaderSize);
+    calcCheckSum(this, &resFrame, responseSize);
 #endif
-    udpSendData((const char *)&resFrame, FragmentHeaderSize, addr);
+    udpSendData((const char *)&resFrame, responseSize, addr);
 }
 
 int getFrameLength(fragment *frame) {
     switch(frame->type) {
         case FRAGMENT_RESPONSE:
+            return responseSize;
+            break;
         case FRAGMENT_RESET:
         case FRAGMENT_RESET_RESPONSE:
-            return FragmentHeaderSize;
+            return resetSize;
         case FRAGMENT_DATA:
             return frame->fragmentID == frame->fragmentNum - 1 ? FragmentHeaderSize + frame->dataSize - (frame->fragmentNum - 1) * FragmentDataSize : FragmentSize;
         default:
@@ -403,13 +399,13 @@ unsigned __stdcall recvThread(LPVOID data) {
     int timeCnt = 0;
     while(godFather->stat) {	//check service stat
         recvLen = godFather->udpRecvData(buf, bufSize, &tmpRemoteAddr);
-        if(recvLen >= FragmentHeaderSize) {	//basic requirement to be a ReliUDP frame
+        if(recvLen >= minPacketSize) {	//basic requirement to be a ReliUDP frame
             frame = (fragment *)buf;		//let's recognize it as a frame
             int frameLen = getFrameLength(frame);
 #ifdef CHECK_SUM
             //checkSum
-            uint32_t checkSum = frame->checkSum;
-            uint32_t realCkcSum = calcCheckSum(godFather, frame, frameLen);
+            uint8_t checkSum = frame->checkSum;
+            uint8_t realCkcSum = calcCheckSum(godFather, frame, frameLen);
             if(checkSum != realCkcSum) {
                 frame->type = FRAGMENT_INVALID;	//mark as invalid fragment
             }
