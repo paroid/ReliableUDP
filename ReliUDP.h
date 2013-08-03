@@ -1,5 +1,4 @@
 #pragma once
-#pragma pack(4)
 
 #include <iostream>
 #include <WinSock2.h>
@@ -10,6 +9,7 @@
 #include <time.h>
 #include <Windows.h>
 
+#define RESEND_COUNT
 #define CHECK_SUM
 
 typedef unsigned char uint8_t;			//8-bit
@@ -23,8 +23,8 @@ static const int OSBufferSize = 65536;			//OS bufferSize default 64k
 
 static const int FragmentDataSize = 4096;		//default 4k
 static const int FragmentHeaderSize = 12;		//header 12
-static const int responseSize = 6;
-static const int resetSize = 2;
+static const int responseSize = 8;
+static const int resetSize = 4;
 static const int minPacketSize = resetSize;
 static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
@@ -69,6 +69,8 @@ static const int selectTimeoutTime = 1;			//default 1s
 using namespace std;
 
 
+#pragma pack(push)
+#pragma pack(4)
 typedef struct _fragmentST {
     uint8_t type;			//DATA / RESPONSE / RESET / RESET_RESPONSE / INVALID
     uint8_t checkSum;
@@ -77,7 +79,7 @@ typedef struct _fragmentST {
     uint32_t dataSize;
     char data[FragmentDataSize];
 } fragment;
-
+#pragma pack(pop)
 
 inline bool checkTimeout(DWORD timeoutTime) {
     DWORD now = GetTickCount();
