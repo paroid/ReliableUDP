@@ -22,7 +22,7 @@ static const int recvThreadNum = 3;				//default 3
 static const int OSBufferSize = 65536;			//OS bufferSize default 64k
 
 static const int FragmentDataSize = 4096;		//default 4k
-static const int FragmentHeaderSize = 12;		//header 16
+static const int FragmentHeaderSize = 10;		//header 16
 static const int responseSize = 6;
 static const int resetSize = 2;
 static const int minPacketSize = resetSize;
@@ -74,7 +74,6 @@ typedef struct _fragmentST {
     uint8_t checkSum;
     uint16_t messageSeqID;
     uint16_t fragmentID;
-    uint16_t fragmentNum;	//max 2^16
     uint32_t dataSize;
     char data[FragmentDataSize];
 } fragment;
@@ -198,7 +197,8 @@ public:
     void newSeq(const fragment *frame, const SOCKADDR_IN *addr) {
         list<statEntry>::iterator it = find(frame, addr);
         if(it == indexSet.end()) {
-            statEntry *entry = new statEntry(addr, frame->messageSeqID, frame->fragmentNum);
+            int fragmentCount = frame->dataSize / FragmentDataSize + ((frame->dataSize % FragmentDataSize) != 0);
+            statEntry *entry = new statEntry(addr, frame->messageSeqID, fragmentCount);
             indexSet.push_back(*entry);
         }
     }
@@ -340,7 +340,8 @@ public:
     void newSeq(const fragment *frame, const SOCKADDR_IN *addr) {
         list<recvEntry>::iterator it = find(frame, addr);
         if(it == indexSet.end()) {
-            recvEntry *entry = new recvEntry(addr, frame->messageSeqID, frame->fragmentNum, frame->dataSize);
+            int fragmentCount = frame->dataSize / FragmentDataSize + ((frame->dataSize % FragmentDataSize) != 0);
+            recvEntry *entry = new recvEntry(addr, frame->messageSeqID, fragmentCount, frame->dataSize);
             indexSet.push_back(*entry);
         }
     }

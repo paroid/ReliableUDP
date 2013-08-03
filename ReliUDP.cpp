@@ -238,9 +238,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
     //the sending frame
     fragment frame;
     frame.type = FRAGMENT_DATA;
-    //frame.IPort = getIPort(para->addr);	//IPort tmp remote Addr for easy ST op
     frame.messageSeqID = para->messageSeqId;	//note: this is the real messageSeqId godfather->messageSeqID maybe not !
-    frame.fragmentNum = fragmentCount;
     frame.dataSize = dataLength;
 #ifdef RESEND_COUNT
     EnterCriticalSection(&godFather->resendCountMutex);
@@ -373,6 +371,7 @@ void ReliUDP::sendResponse(fragment *frame, SOCKADDR_IN addr) {
 }
 
 int getFrameLength(fragment *frame) {
+    int fragmentCount = frame->dataSize / FragmentDataSize + ((frame->dataSize % FragmentDataSize) != 0);
     switch(frame->type) {
         case FRAGMENT_RESPONSE:
             return responseSize;
@@ -381,7 +380,7 @@ int getFrameLength(fragment *frame) {
         case FRAGMENT_RESET_RESPONSE:
             return resetSize;
         case FRAGMENT_DATA:
-            return frame->fragmentID == frame->fragmentNum - 1 ? FragmentHeaderSize + frame->dataSize - (frame->fragmentNum - 1) * FragmentDataSize : FragmentSize;
+            return frame->fragmentID == fragmentCount - 1 ? FragmentHeaderSize + frame->dataSize - (fragmentCount - 1) * FragmentDataSize : FragmentSize;
         default:
             frame->type = FRAGMENT_INVALID;
             return 0;
@@ -424,7 +423,7 @@ unsigned __stdcall recvThread(LPVOID data) {
                     EnterCriticalSection(&godFather->recvStatMutex);
                     godFather->RT.clearSeqSet(frame, &tmpRemoteAddr);	//clear SEQ buffer Set to reset
                     LeaveCriticalSection(&godFather->recvStatMutex);
-                    godFather->sendResetResponse(tmpRemoteAddr);	//send response
+                    godFather->sendResetResponse(tmpRemoteAddr);		//send response
                     break;
                 case FRAGMENT_RESET_RESPONSE:
                     godFather->resetWaitFlag = false; //reset RESET flag
