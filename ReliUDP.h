@@ -22,7 +22,7 @@ static const int recvThreadNum = 3;				//default 3
 static const int OSBufferSize = 65536;			//OS bufferSize default 64k
 
 static const int FragmentDataSize = 4096;		//default 4k
-static const int FragmentHeaderSize = 10;		//header 16
+static const int FragmentHeaderSize = 12;		//header 12
 static const int responseSize = 6;
 static const int resetSize = 2;
 static const int minPacketSize = resetSize;
