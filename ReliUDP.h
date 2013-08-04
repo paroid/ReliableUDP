@@ -382,34 +382,23 @@ public:
     //clear receive Set
     void clearSeqSet(const fragment *frame, const SOCKADDR_IN *addr) {
         list<IPortSeq>::iterator it = receivedSeqSet.begin();
-        for(size_t i = 0; i < receivedSeqSet.size(); ++i) {
-            if(it->IP == addr->sin_addr.S_un.S_addr && it->port == addr->sin_port) {
-                receivedSeqSet.erase(it);
-                it = receivedSeqSet.begin();
-                int t = i;
-                while(t--)	++it;
-                --i;
-            }
-            else
-                ++it;
+        while(it != receivedSeqSet.end()) {
+            if(it->IP == addr->sin_addr.S_un.S_addr && it->port == addr->sin_port)
+                it = receivedSeqSet.erase(it);
+            else ++it;
         }
     }
     void removeTimeout() {
         DWORD now = GetTickCount();
         list<recvEntry>::iterator it = indexSet.begin();
-        for(size_t i = 0; i < indexSet.size(); ++i) {
+        while(it != indexSet.end()) {
             if(it->timeout(now)) {
 #ifdef DEBUG
                 cout << "[timeout:" << it->id << "]" << endl;
 #endif
-                indexSet.erase(it);
-                it = indexSet.begin();
-                int t = i;
-                while(t--)	++it;
-                --i;
+                it = indexSet.erase(it);
             }
-            else
-                ++it;
+            else ++it;
         }
     }
 
