@@ -380,7 +380,7 @@ public:
         }
     }
     //clear receive Set
-    void clearSeqSet(const fragment *frame, const SOCKADDR_IN *addr) {
+    void clearSeqSet(const SOCKADDR_IN *addr) {
         list<IPortSeq>::iterator it = receivedSeqSet.begin();
         while(it != receivedSeqSet.end()) {
             if(it->IP == addr->sin_addr.S_un.S_addr && it->port == addr->sin_port)

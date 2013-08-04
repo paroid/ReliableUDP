@@ -371,7 +371,6 @@ void ReliUDP::sendResponse(fragment *frame, SOCKADDR_IN addr) {
 }
 
 int getFrameLength(fragment *frame) {
-    int fragmentCount = frame->dataSize / FragmentDataSize + ((frame->dataSize % FragmentDataSize) != 0);
     switch(frame->type) {
         case FRAGMENT_RESPONSE:
             return responseSize;
@@ -379,8 +378,10 @@ int getFrameLength(fragment *frame) {
         case FRAGMENT_RESET:
         case FRAGMENT_RESET_RESPONSE:
             return resetSize;
-        case FRAGMENT_DATA:
+        case FRAGMENT_DATA: {
+            int fragmentCount = frame->dataSize / FragmentDataSize + ((frame->dataSize % FragmentDataSize) != 0);
             return frame->fragmentID == fragmentCount - 1 ? FragmentHeaderSize + frame->dataSize - (fragmentCount - 1) * FragmentDataSize : FragmentSize;
+        }
         default:
             frame->type = FRAGMENT_INVALID;
             return 0;
@@ -421,7 +422,7 @@ unsigned __stdcall recvThread(LPVOID data) {
                     break;
                 case FRAGMENT_RESET:
                     EnterCriticalSection(&godFather->recvStatMutex);
-                    godFather->RT.clearSeqSet(frame, &tmpRemoteAddr);	//clear SEQ buffer Set to reset
+                    godFather->RT.clearSeqSet(&tmpRemoteAddr);	//clear SEQ buffer Set to reset
                     LeaveCriticalSection(&godFather->recvStatMutex);
                     godFather->sendResetResponse(tmpRemoteAddr);		//send response
                     break;
