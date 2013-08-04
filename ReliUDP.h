@@ -36,7 +36,7 @@ static const int SendTimeoutFactor = 50;		//default 50  ms/frame
 static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 1000.0);		//default 1 s
 
 static const double ExpectRate = 1; 			//default 100%
-static const int ExpectTimeout = 24;			//default 32 ms
+static const int ExpectTimeout = 32;			//default 32 ms
 static const int skipWaitTime = 4;
 static const int ExpectExceptionSize = 12;		//default 12
 

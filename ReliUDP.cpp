@@ -200,7 +200,7 @@ void ReliUDP::sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char s
     LeaveCriticalSection(&sendCountMutex);
     if((sendOpt & SEND_BLOCK_CHECK) == SEND_UNBLOCK) {	//unblock send threadNum check
         EnterCriticalSection(&threadNumMutex);
-        if(threadNum > MaxThread)
+        if(threadNum >= MaxThread)
             sendOpt |= SEND_BLOCK;
         else
             ++threadNum;
@@ -296,8 +296,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         }
         LeaveCriticalSection(&godFather->sendStatMutex);
         //responsive send
-        //expectedSize *= ExpectRate;
-        flag = (queue.size() < ExpectExceptionSize || prevSize - queue.size() >= expectedSize || checkTimeout(timer)); //dword overflow
+        flag = (queue.size() < ExpectExceptionSize || prevSize - queue.size() >= expectedSize || checkTimeout(timer)); //wait for response until timeout
         prevSize = queue.size();
         if(!flag) {	//do not resend
             Sleep(skipWaitTime);
@@ -305,11 +304,10 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         }
         expectedSize = 0;
         //send frames
-        //frame.IPort = getIPort(godFather->localAddr); //use local iport to send data
-        int SendSampleInc = queue.size() / (SendSampleSize / FragmentSize + 1) + 1;
+        int SendSampleCount = SendSampleSize / FragmentSize + 1;
         int lastDataSize = dataLength - (fragmentCount - 1) * FragmentDataSize;
         int lastFrameSize = lastDataSize + FragmentHeaderSize;
-        for(size_t i = 0; i < queue.size(); i += SendSampleInc) {
+        for(size_t i = 0; i < SendSampleCount && i < queue.size(); ++i) {
             ++expectedSize;
             frame.fragmentID = queue[i];
             int dataSize = FragmentDataSize;
