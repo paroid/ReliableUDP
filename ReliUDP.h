@@ -28,7 +28,6 @@ static const int minPacketSize = resetSize;
 static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
 static const int TimeWait = 8 ;					//default 8
-static const int TimeWaitSizeFactor = int((0.002 * double(FragmentDataSize) / 10240.0)) ;	//(0.002*(double(FRAGMENT_DATA_SIZE)/10240.0))			ms/frame
 
 static const int SendSampleSize = 1024 * 24;	//default 24k
 
@@ -36,13 +35,14 @@ static const int SendTimeout = 3000;			//default 3k ms
 static const int SendTimeoutFactor = 50;		//default 50  ms/frame
 static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 1000.0);		//default 1 s
 
-static const double ExpectRate = .99; 			//default 99%
-static const int ExpectTimeout = 32;			//default 32 ms
+static const double ExpectRate = 1; 			//default 100%
+static const int ExpectTimeout = 24;			//default 32 ms
+static const int skipWaitTime = 4;
 static const int ExpectExceptionSize = 12;		//default 12
 
-static const int RecvSeqIDBufferSize = 320;		//default 200
+static const int RecvSeqIDBufferSize = 320;		//default 320
 
-static const int RecvBUFWait = 50;				//default 5ms
+static const int RecvBUFWait = 50;				//default 50ms
 
 static const int FragmentTimeout = 3000;		//default 3k ms
 static const int FragmentTimeoutFactor = 2;		//default 2ms/frame

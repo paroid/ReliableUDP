@@ -293,11 +293,11 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         }
         LeaveCriticalSection(&godFather->sendStatMutex);
         //responsive send
-        expectedSize *= ExpectRate;
+        //expectedSize *= ExpectRate;
         flag = (queue.size() < ExpectExceptionSize || prevSize - queue.size() >= expectedSize || checkTimeout(timer)); //dword overflow
         prevSize = queue.size();
         if(!flag) {	//do not resend
-            Sleep(5);
+            Sleep(skipWaitTime);
             continue;
         }
         expectedSize = 0;
@@ -332,8 +332,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         }
         timer = GetTickCount() + ExpectTimeout;
         //wait for next check
-        int sleepTime = TimeWait + int(TimeWaitSizeFactor * queue.size());	//sleep
-        Sleep(sleepTime);
+        Sleep(TimeWait);
     }
 }
 
