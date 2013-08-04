@@ -27,9 +27,11 @@ SOCKADDR_IN ReliUDP::getAddr(string ip, int port) {
 }
 
 ReliUDP::ReliUDP(void) {
-    winSockInit();
+    if(winSockInit() == SOCK_INIT_FAIL) {
+        cout << "socket init fail" << endl;
+    }
     memset(&localAddr, 0, sizeof(localAddr));
-    stat = false;
+    stat = COM_OFF;
     sendCount = 0;
     threadNum = 0;
 #ifdef RESEND_COUNT
@@ -48,9 +50,10 @@ bool ReliUDP::winSockInit() {
     WSADATA wsaData;
     wVersionRequested = MAKEWORD( 2, 2 );
     int err = WSAStartup( wVersionRequested, &wsaData );
-    if ( err != 0 ) //winSock Error
+    if ( err != 0 ) { 		//winSock Error
         cout << "WSAStartup Fail" << endl;
-    return SOCK_INIT_FAIL;
+        return SOCK_INIT_FAIL;
+    }
     if ( LOBYTE( wsaData.wVersion ) != 2 || HIBYTE( wsaData.wVersion ) != 2) {  //version check
         WSACleanup( );
         cout << "WSAStartup WORD Fail" << endl;
@@ -98,7 +101,7 @@ void ReliUDP::startCom() {
     InitializeCriticalSection(&resendCountMutex);
 #endif
     //start recvThread[]
-    stat = true;
+    stat = COM_ON;
     unsigned dwThreadID;
     for(int i = 0; i < recvThreadNum; ++i) {
         recvThreadHandle[i] = (HANDLE)_beginthreadex(NULL, 0, &recvThread, (LPVOID) this, 0, &dwThreadID);
@@ -123,7 +126,7 @@ void ReliUDP::stopCom() {
     //wait for send thread
     while(sendCount)
         Sleep(20);
-    stat = false;
+    stat = COM_OFF;
     //wait for recvThread[] to terminate
     for(int i = 0; i < recvThreadNum; ++i) {
         while(1) {
@@ -393,16 +396,16 @@ unsigned __stdcall recvThread(LPVOID data) {
     const int bufSize = FragmentSize;	//Data Content + Header
     char buf[bufSize];
     int recvLen, dataLen;
-    fragment *frame;	//to form a frame
+    fragment *frame;					//to form a frame
     SOCKADDR_IN tmpRemoteAddr;
     int timeCnt = 0;
-    while(godFather->stat) {	//check service stat
+    while(godFather->stat) {			//check service stat
         recvLen = godFather->udpRecvData(buf, bufSize, &tmpRemoteAddr);
         if(recvLen >= minPacketSize) {	//basic requirement to be a ReliUDP frame
-            frame = (fragment *)buf;		//let's recognize it as a frame
+            frame = (fragment *)buf;	//recognize it as a frame
             int frameLen = getFrameLength(frame);
-#ifdef CHECK_SUM
             //checkSum
+#ifdef CHECK_SUM
             uint8_t checkSum = frame->checkSum;
             uint8_t realCkcSum = calcCheckSum(godFather, frame, frameLen);
             if(checkSum != realCkcSum) {
@@ -446,10 +449,10 @@ unsigned __stdcall recvThread(LPVOID data) {
                     }
                     //let's do it
                     dataLen = frameLen - FragmentHeaderSize;
-                    if(godFather->RT.check(frame, &tmpRemoteAddr)) { //make sure this frame hasn't been received
+                    if(godFather->RT.check(frame, &tmpRemoteAddr)) {				//make sure this frame hasn't been received
                         godFather->RT.storeData(frame, &tmpRemoteAddr, dataLen);	//storeData & set Bit
                         //check if all received
-                        if(godFather->RT.getOne(frame, &tmpRemoteAddr) == -1) {	//all received
+                        if(godFather->RT.getOne(frame, &tmpRemoteAddr) == -1) {		//all received
                             //add messageSeqID
                             godFather->RT.addSeqId(frame, &tmpRemoteAddr);
                             EnterCriticalSection(&godFather->bufMutex);
@@ -463,13 +466,13 @@ unsigned __stdcall recvThread(LPVOID data) {
                     }
                     LeaveCriticalSection(&godFather->recvStatMutex);
                     break;
-                case FRAGMENT_INVALID:	//do nothing
+                case FRAGMENT_INVALID:	//do nothing  :discard
 #ifdef DEBUG
                     cout << "[invalid frame]" << endl;
 #endif
                     break;
             }
-            if(!((timeCnt++) & 0xff)) { //256 recv => 1 remove
+            if(!((timeCnt++) & 0xff)) { //256 recv => 1 remove timeout entry
                 EnterCriticalSection(&godFather->recvStatMutex);
                 godFather->RT.removeTimeout();
                 LeaveCriticalSection(&godFather->recvStatMutex);

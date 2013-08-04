@@ -61,6 +61,9 @@ static const int selectTimeoutTime = 1;			//default 1s
 #define SOCK_INIT_FAIL false
 #define SOCK_INIT_OK true
 
+#define COM_ON true
+#define COM_OFF false
+
 #define SEND_BLOCK 1
 #define SEND_UNBLOCK 0
 #define SEND_BLOCK_CHECK 1	//bit 0
