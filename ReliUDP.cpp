@@ -261,9 +261,9 @@ unsigned __stdcall sendDataThread(LPVOID data) {
     bool flag = false;
     uint32_t expectedSize = 0;
     DWORD timer;
+    size_t fragIdCur = 0;
     while(1) {
         queue.clear();	//let me make it clear
-        //frame.IPort = getIPort(para->addr); //set tmp addr
         bool over = false;
         EnterCriticalSection(&godFather->sendStatMutex);
         queue = godFather->ST.getAll(&frame, &para->addr);	//check the send stat	get all un-responded frame
@@ -309,19 +309,22 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         int lastFrameSize = lastDataSize + FragmentHeaderSize;
         for(size_t i = 0; i < SendSampleCount && i < queue.size(); ++i) {
             ++expectedSize;
-            frame.fragmentID = queue[i];
+            while(fragIdCur >= queue.size())	//mod
+                fragIdCur -= queue.size();
+            frame.fragmentID = queue[fragIdCur];
             int dataSize = FragmentDataSize;
             int frameSize = FragmentSize;
-            if(queue[i] == fragmentCount - 1) { //last one
+            if(queue[fragIdCur] == fragmentCount - 1) { //last one
                 dataSize = lastDataSize;
                 frameSize = lastFrameSize;
             }
-            memcpy(frame.data, dat + queue[i]*FragmentDataSize, dataSize);
+            memcpy(frame.data, dat + queue[fragIdCur]*FragmentDataSize, dataSize);
 #ifdef CHECK_SUM
             //checkSum
             calcCheckSum(godFather, &frame, frameSize);
 #endif
             godFather->udpSendData((const char *)&frame, frameSize, para->addr);
+            ++fragIdCur;
 #ifdef DEBUG_RS
             cout << "[resend: -->>] " << frame.messageSeqID << "--" << frame.fragmentID << endl;
 #endif
