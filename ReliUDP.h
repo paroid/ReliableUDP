@@ -16,16 +16,19 @@ typedef unsigned short uint16_t;		//16-bit
 typedef unsigned int uint32_t;			//32-bit
 
 static const int MaxThread = 12;				//default 12
-static const int recvThreadNum = 3;				//default 3
+static const int RecvThreadNum = 3;				//default 3
 
 static const int OSBufferSize = 65536;			//OS bufferSize default 64k
 
 static const int FragmentDataSize = 4096;		//default 4k
 static const int FragmentHeaderSize = 12;		//header 12
-static const int responseSize = 6;
-static const int resetSize = 2;
-static const int minPacketSize = resetSize;
+static const int ResponseSize = 6;
+static const int TestRTTSize = 4;
+static const int ResetSize = 2;
+static const int MinPacketSize = ResetSize;
 static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
+
+static const int MaxTestTimes = 32;				//32*50 = 1600 ms
 
 static const int TimeWait = 8 ;					//default 8
 
@@ -37,7 +40,7 @@ static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 100
 
 static const double ExpectRate = 1; 			//default 100%
 static const int ExpectTimeout = 32;			//default 32 ms
-static const int skipWaitTime = 4;
+static const int SkipWaitTime = 4;
 static const int ExpectExceptionSize = 12;		//default 12
 
 static const int RecvSeqIDBufferSize = 320;		//default 320
@@ -47,13 +50,15 @@ static const int RecvBUFWait = 50;				//default 50ms
 static const int FragmentTimeout = 3000;		//default 3k ms
 static const int FragmentTimeoutFactor = 2;		//default 2ms/frame
 
-static const int selectTimeoutTime = 1;			//default 1s
+static const int SelectTimeoutTime = 1;			//default 1s
 
 #define FRAGMENT_DATA 73
 #define FRAGMENT_RESPONSE 81
 #define FRAGMENT_INVALID 59
 #define FRAGMENT_RESET 43
 #define FRAGMENT_RESET_RESPONSE 91
+#define RTT_TEST 47
+#define RTT_TEST_RESPONSE 31
 
 
 #define ID_ERROR -2
@@ -511,6 +516,7 @@ public:
     void stopCom();
     void clearCom();
     void resetCom(SOCKADDR_IN addr);
+    int testRTT(SOCKADDR_IN addr);
     void sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt = SEND_BLOCK);
     int recvData(char *buf, int dataLength, SOCKADDR_IN *addr);
     uint32_t getNextDataLength();
@@ -529,6 +535,8 @@ private:
     void sendResponse(fragment *frame, SOCKADDR_IN addr);
     void sendReset(SOCKADDR_IN addr);
     void sendResetResponse(SOCKADDR_IN addr);
+    void sendRTTTest(SOCKADDR_IN addr, uint16_t seq);
+    void sendRTTResponse(SOCKADDR_IN addr, uint16_t seq);
 
     friend unsigned __stdcall recvThread(LPVOID data);
     friend unsigned __stdcall sendDataThread(LPVOID data);
@@ -549,7 +557,11 @@ private:
     bool stat;
     bool dataCopyingFlag;
     bool resetWaitFlag;
-    HANDLE recvThreadHandle[recvThreadNum];
+    uint8_t RTTRecvCount;
+    DWORD *RTTRecvTime;
+    HANDLE recvThreadHandle[RecvThreadNum];
+    CRITICAL_SECTION rttTestMutex;
+    CRITICAL_SECTION rttTestRecvMutex;
     CRITICAL_SECTION sendMutex;
     CRITICAL_SECTION sendStatMutex;
     CRITICAL_SECTION bufMutex;
