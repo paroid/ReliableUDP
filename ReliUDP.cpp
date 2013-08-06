@@ -395,7 +395,7 @@ void ReliUDP::sendResetResponse(SOCKADDR_IN addr) {
 
 void ReliUDP::sendRTTTest(SOCKADDR_IN addr, uint16_t seq) {
     fragment resFrame;
-    resFrame.type = RTT_TEST;
+    resFrame.type = FRAGMENT_RTT_TEST;
     resFrame.messageSeqID = seq;
 #ifdef CHECK_SUM
     //checkSum
@@ -406,7 +406,7 @@ void ReliUDP::sendRTTTest(SOCKADDR_IN addr, uint16_t seq) {
 
 void ReliUDP::sendRTTResponse(SOCKADDR_IN addr, uint16_t seq) {
     fragment resFrame;
-    resFrame.type = RTT_TEST_RESPONSE;
+    resFrame.type = FRAGMENT_RTT_TEST_RESPONSE;
     resFrame.messageSeqID = seq;
 #ifdef CHECK_SUM
     //checkSum
@@ -436,8 +436,8 @@ int getFrameLength(fragment *frame) {
         case FRAGMENT_RESET:
         case FRAGMENT_RESET_RESPONSE:
             return ResetSize;
-        case RTT_TEST:
-        case RTT_TEST_RESPONSE:
+        case FRAGMENT_RTT_TEST:
+        case FRAGMENT_RTT_TEST_RESPONSE:
             return TestRTTSize;
         case FRAGMENT_DATA: {
             int fragmentCount = frame->dataSize / FragmentDataSize + ((frame->dataSize % FragmentDataSize) != 0);
@@ -490,11 +490,11 @@ unsigned __stdcall recvThread(LPVOID data) {
                 case FRAGMENT_RESET_RESPONSE:
                     godFather->resetWaitFlag = false;						//reset RESET flag
                     break;
-                case RTT_TEST:
+                case FRAGMENT_RTT_TEST:
                     cout << "TEST recv:" << frame->messageSeqID << endl;
                     godFather->sendRTTResponse(tmpRemoteAddr, frame->messageSeqID);	//just send a response
                     break;
-                case RTT_TEST_RESPONSE:
+                case FRAGMENT_RTT_TEST_RESPONSE:
                     EnterCriticalSection(&godFather->rttTestRecvMutex);
                     cout << "response recv:" << frame->messageSeqID << endl;
                     ++godFather->RTTRecvCount;

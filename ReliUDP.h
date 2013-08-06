@@ -57,8 +57,8 @@ static const int SelectTimeoutTime = 1;			//default 1s
 #define FRAGMENT_INVALID 59
 #define FRAGMENT_RESET 43
 #define FRAGMENT_RESET_RESPONSE 91
-#define RTT_TEST 47
-#define RTT_TEST_RESPONSE 31
+#define FRAGMENT_RTT_TEST 47
+#define FRAGMENT_RTT_TEST_RESPONSE 31
 
 
 #define ID_ERROR -2
