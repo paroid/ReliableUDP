@@ -181,7 +181,6 @@ int ReliUDP::testRTT(SOCKADDR_IN addr) {
             totalTime += recvTime[i] - sendTime[i];
     }
     DWORD RTT = (totalTime + (RTTRecvCount >> 1)) / RTTRecvCount;
-    cout << totalTime << " / " << (int)RTTRecvCount << endl;
     LeaveCriticalSection(&rttTestMutex);
     delete[] recvTime;
     return RTT;
@@ -491,12 +490,10 @@ unsigned __stdcall recvThread(LPVOID data) {
                     godFather->resetWaitFlag = false;						//reset RESET flag
                     break;
                 case FRAGMENT_RTT_TEST:
-                    cout << "TEST recv:" << frame->messageSeqID << endl;
                     godFather->sendRTTResponse(tmpRemoteAddr, frame->messageSeqID);	//just send a response
                     break;
                 case FRAGMENT_RTT_TEST_RESPONSE:
                     EnterCriticalSection(&godFather->rttTestRecvMutex);
-                    cout << "response recv:" << frame->messageSeqID << endl;
                     ++godFather->RTTRecvCount;
                     godFather->RTTRecvTime[frame->messageSeqID] = GetTickCount();
                     LeaveCriticalSection(&godFather->rttTestRecvMutex);
