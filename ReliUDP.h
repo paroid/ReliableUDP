@@ -36,9 +36,9 @@ static const int SendSampleSize = 1024 * 24;	//default 24k
 static const int MaxSpeedRate = 8 * 1024 * 1024;	// B/s
 static const int MinSpeedRate = 128 * 1024;		// B/s
 
-static const int SendTimeout = 3000;			//default 3k ms
+static const int SendTimeout = 30000;			//default 3k ms
 static const int SendTimeoutFactor = 50;		//default 50  ms/frame
-static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 1000.0);		//default 1 s
+static const int SendNoReceiverTimeout = int(10000 * double(CLOCKS_PER_SEC) / 1000.0);		//default 1 s
 
 static const double ExpectRate = .98; 			//default 100%
 static const int ExpectTimeout = 32;			//default 32 ms
@@ -520,6 +520,7 @@ public:
     void clearCom();
     void resetCom(SOCKADDR_IN addr);
     int testRTT(SOCKADDR_IN addr);
+    void setSendSpeed(DWORD sp);
     void sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt = SEND_BLOCK, int RTT = 4);
     int recvData(char *buf, int dataLength, SOCKADDR_IN *addr);
     uint32_t getNextDataLength();
@@ -562,6 +563,7 @@ private:
     bool resetWaitFlag;
     uint8_t RTTRecvCount;
     DWORD *RTTRecvTime;
+    DWORD sendSpeedRate;
     HANDLE recvThreadHandle[RecvThreadNum];
     CRITICAL_SECTION rttTestMutex;
     CRITICAL_SECTION rttTestRecvMutex;
@@ -574,6 +576,12 @@ private:
     CRITICAL_SECTION recvStatMutex;
     CRITICAL_SECTION udpSendMutex;
     CRITICAL_SECTION udpRecvMutex;
+    CRITICAL_SECTION sendFlowCntMutex;
+    CRITICAL_SECTION responseFlowCntMutex;
+    CRITICAL_SECTION speedMutex;
+    DWORD sendFlowCnt;
+    DWORD responseFlowCnt;
+    DWORD time;
 #ifdef RESEND_COUNT
     CRITICAL_SECTION resendCountMutex;
     uint32_t resendCount;

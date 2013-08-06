@@ -34,6 +34,7 @@ ReliUDP::ReliUDP(void) {
     stat = COM_OFF;
     sendCount = 0;
     threadNum = 0;
+    sendSpeedRate = MaxSpeedRate;
 #ifdef RESEND_COUNT
     resendCount = 0;
     sendTotalCount = 0;
@@ -67,6 +68,9 @@ void ReliUDP::setLocalAddr(string ip, int port) {
     localPort = port;
 }
 
+void ReliUDP::setSendSpeed(DWORD sp) {
+    sendSpeedRate = sp;
+}
 
 
 void ReliUDP::startCom() {
@@ -79,8 +83,10 @@ void ReliUDP::startCom() {
     //init socket
     if((sock = socket(AF_INET, SOCK_DGRAM, 0)) < 0)
         std::cout << "Socket Error!" << endl;
+    
     if(bind(sock, (sockaddr *) &localAddr, sizeof(sockaddr)) < 0)
-        std::cout << "Bind Error!" << endl;
+    std::cout << "Bind Error!" << endl;
+    
     DWORD nonBlocking = 1;
     if(ioctlsocket(sock, FIONBIO, &nonBlocking) != 0) {	 //set non-blocking socket
         std::cout <<  "Set Non-Blocking Error!"  << endl;
@@ -101,6 +107,9 @@ void ReliUDP::startCom() {
     InitializeCriticalSection(&rttTestRecvMutex);
     InitializeCriticalSection(&udpRecvMutex);
     InitializeCriticalSection(&udpSendMutex);
+    InitializeCriticalSection(&sendFlowCntMutex);
+    InitializeCriticalSection(&responseFlowCntMutex);
+    InitializeCriticalSection(&speedMutex);
 #ifdef RESEND_COUNT
     InitializeCriticalSection(&resendCountMutex);
 #endif
@@ -150,6 +159,9 @@ void ReliUDP::stopCom() {
     DeleteCriticalSection(&rttTestRecvMutex);
     DeleteCriticalSection(&udpRecvMutex);
     DeleteCriticalSection(&udpSendMutex);
+    DeleteCriticalSection(&sendFlowCntMutex);
+    DeleteCriticalSection(&responseFlowCntMutex);
+    DeleteCriticalSection(&speedMutex);
 #ifdef RESEND_COUNT
     DeleteCriticalSection(&resendCountMutex);
 #endif
@@ -305,14 +317,9 @@ unsigned __stdcall sendDataThread(LPVOID data) {
     uint32_t prevSize = 0;
     bool flag = false;
     uint32_t expectedSize = 0;
-    DWORD timer;
     DWORD speedTimer;
-    DWORD sendSpeedRate = MaxSpeedRate;
     DWORD sendStartTime = GetTickCount();
-    DWORD time;
-    DWORD rateBeginTime = 0;
-    int sendCnt = 0;
-    int responseCnt = 0;
+    DWORD tmpTime;
     size_t fragIdCur = 0;
     while(1) {
         queue.clear();	//let me make it clear
@@ -338,6 +345,10 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             LeaveCriticalSection(&godFather->sendStatMutex);
             EnterCriticalSection(&godFather->sendCountMutex);
             --godFather->sendCount;
+            if(!godFather->sendCount) { //send over reset flow control  CNT
+                godFather->sendFlowCnt = 0;
+                godFather->responseFlowCnt = 0;
+            }
             LeaveCriticalSection(&godFather->sendCountMutex);
             if((para->sendOpt & SEND_BLOCK_CHECK) == SEND_UNBLOCK) {
                 delete[] (char *)dat; //unblock send -> free mem
@@ -350,26 +361,38 @@ unsigned __stdcall sendDataThread(LPVOID data) {
         }
 
         //flow control
-        time = GetTickCount() - sendStartTime; //time count from send start
-        if(time > para->RTT) { //after RTT
-            responseCnt = fragmentCount - queue.size();
-            if(sendSpeedRate > MinSpeedRate  && responseCnt < int(sendCnt * ExpectRate)) { //slow down
-                sendSpeedRate = max(MinSpeedRate, sendSpeedRate >> 1);
-                rateBeginTime = time;
+        tmpTime = GetTickCount(); //time count from send start
+        if(tmpTime - sendStartTime > para->RTT) { //after RTT
+            EnterCriticalSection(&godFather->sendFlowCntMutex);
+            EnterCriticalSection(&godFather->responseFlowCntMutex);
+            if(godFather->sendSpeedRate > MinSpeedRate  && tmpTime - godFather->time > 500 && godFather->responseFlowCnt < int(godFather->sendFlowCnt * ExpectRate)) { //slow down
+                godFather->sendSpeedRate = max(MinSpeedRate, godFather->sendSpeedRate >> 1);
+                cout << "speed down:" << godFather->sendSpeedRate << endl;
+                godFather->time = tmpTime;
 
             }
-            else if(sendSpeedRate < MaxSpeedRate &&  time - rateBeginTime > 500 && responseCnt >= int(sendCnt * ExpectRate)) { //speed up
-                sendSpeedRate = min(MaxSpeedRate, sendSpeedRate << 1);
-                rateBeginTime = time;
+            else if(godFather->sendSpeedRate < MaxSpeedRate &&  tmpTime - godFather->time > 500 && godFather->responseFlowCnt >= int(godFather->sendFlowCnt * ExpectRate)) { //speed up
+                godFather->sendSpeedRate = min(MaxSpeedRate, godFather->sendSpeedRate << 1);
+                cout << "speed up:" << godFather->sendSpeedRate << endl;
+                godFather->time = tmpTime;
             }
+            godFather->responseFlowCnt += (godFather->responseFlowCnt < godFather->sendFlowCnt) ? 1 : -1; //equalizer
+            LeaveCriticalSection(&godFather->responseFlowCntMutex);
+            LeaveCriticalSection(&godFather->sendFlowCntMutex);
         }
 
         //send data
         int SendSampleCount = SendSampleSize / FragmentSize + 1;
         int lastDataSize = dataLength - (fragmentCount - 1) * FragmentDataSize;
         int lastFrameSize = lastDataSize + FragmentHeaderSize;
-        sendCnt += SendSampleCount <= queue.size() ? SendSampleCount : queue.size();
-        speedTimer = GetTickCount() + 1 + 1000 * (SendSampleSize / double(sendSpeedRate));
+
+        EnterCriticalSection(&godFather->sendFlowCntMutex);
+        godFather->sendFlowCnt += SendSampleCount <= queue.size() ? SendSampleCount : queue.size();
+        LeaveCriticalSection(&godFather->sendFlowCntMutex);
+
+        EnterCriticalSection(&godFather->speedMutex);
+        speedTimer = GetTickCount() + 1 + 1000 * (SendSampleSize / double(godFather->sendSpeedRate));
+        LeaveCriticalSection(&godFather->speedMutex);
         for(size_t i = 0; i < SendSampleCount && i < queue.size(); ++i) {
             while(fragIdCur >= queue.size())	//mod
                 fragIdCur -= queue.size();
@@ -397,13 +420,10 @@ unsigned __stdcall sendDataThread(LPVOID data) {
 #endif
         }
         //speed control
-        time = GetTickCount();
-        if(time < speedTimer) {
-            time = speedTimer - time;
-            if(time > 1000) {
-                system("pause");
-            }
-            Sleep(time);
+        tmpTime = GetTickCount();
+        if(tmpTime < speedTimer) {
+            tmpTime = speedTimer - tmpTime;
+            Sleep(tmpTime);
         }
     }
 }
@@ -511,9 +531,12 @@ unsigned __stdcall recvThread(LPVOID data) {
 #ifdef DEBUG_RS
                     cout << "[resp: <<--] " << frame->messageSeqID << "--" << frame->fragmentID << endl;
 #endif
+                    EnterCriticalSection(&godFather->responseFlowCntMutex);
+                    ++godFather->responseFlowCnt;							//inc response CNT
+                    LeaveCriticalSection(&godFather->responseFlowCntMutex);
+
                     EnterCriticalSection(&godFather->sendStatMutex);
-                    //reset in send stat
-                    godFather->ST.reset(frame, &tmpRemoteAddr);
+                    godFather->ST.reset(frame, &tmpRemoteAddr);				//reset
                     LeaveCriticalSection(&godFather->sendStatMutex);
                     break;
                 case FRAGMENT_RESET:
