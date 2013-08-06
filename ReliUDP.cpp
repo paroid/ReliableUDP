@@ -99,6 +99,8 @@ void ReliUDP::startCom() {
     InitializeCriticalSection(&recvStatMutex);
     InitializeCriticalSection(&rttTestMutex);
     InitializeCriticalSection(&rttTestRecvMutex);
+    InitializeCriticalSection(&udpRecvMutex);
+    InitializeCriticalSection(&udpSendMutex);
 #ifdef RESEND_COUNT
     InitializeCriticalSection(&resendCountMutex);
 #endif
@@ -146,6 +148,8 @@ void ReliUDP::stopCom() {
     DeleteCriticalSection(&threadNumMutex);
     DeleteCriticalSection(&rttTestMutex);
     DeleteCriticalSection(&rttTestRecvMutex);
+    DeleteCriticalSection(&udpRecvMutex);
+    DeleteCriticalSection(&udpSendMutex);
 #ifdef RESEND_COUNT
     DeleteCriticalSection(&resendCountMutex);
 #endif
@@ -162,13 +166,14 @@ int ReliUDP::testRTT(SOCKADDR_IN addr) {
     uint16_t seq = 0;
     DWORD *recvTime = new DWORD[MaxTestTimes];
     memset(recvTime, 0, sizeof(DWORD)*MaxTestTimes);
+
     EnterCriticalSection(&rttTestMutex);
     RTTRecvTime = recvTime; //set address
     RTTRecvCount = 0;
     while(RTTRecvCount < 8 && seq < MaxTestTimes) {
         sendTime[seq] = GetTickCount();
         sendRTTTest(addr, seq++);
-        Sleep(50);
+        Sleep(25);
     }
     if(!RTTRecvCount) {
         LeaveCriticalSection(&rttTestMutex);
@@ -189,41 +194,49 @@ int ReliUDP::testRTT(SOCKADDR_IN addr) {
 void ReliUDP::udpSendData(const char *dat, int dataLength, SOCKADDR_IN addr) {
     fd_set writeFD;
     timeval timeout;
-    timeout.tv_sec = SelectTimeoutTime * 20;
+    timeout.tv_sec = SendSelectTimeoutTime;
     timeout.tv_usec = 0;
     FD_ZERO(&writeFD);
     FD_SET(sock, &writeFD);
+    EnterCriticalSection(&udpSendMutex);
     int ret = select(sock + 1, NULL, &writeFD, NULL, &timeout);
-    if(ret <= 0)	//error or send block
+    if(ret <= 0) {	//error or send block
+        LeaveCriticalSection(&udpSendMutex);
         return;
+    }
     if(sendto(sock, dat, dataLength, 0, (sockaddr *)&addr, sizeof(sockaddr)) < 0) {
 #ifdef DEBUG
         std::cout << "Send Error: " << WSAGetLastError() << endl;
 #endif
     }
+    LeaveCriticalSection(&udpSendMutex);
 }
 
 int ReliUDP::udpRecvData(char *buf, int dataLength, SOCKADDR_IN *addr) {
     fd_set readFD;
     timeval timeout;
-    timeout.tv_sec = SelectTimeoutTime;
-    timeout.tv_usec = 0;
+    timeout.tv_sec = 0;
+    timeout.tv_usec = RecvSelectTimeoutTime;
     FD_ZERO(&readFD);
     FD_SET(sock, &readFD);
+    EnterCriticalSection(&udpRecvMutex);
     int ret = select(sock + 1, &readFD, NULL, NULL, &timeout);
-    if(ret <= 0)	//error or no data to read
+    if(ret <= 0) {	//error or no data to read
+        LeaveCriticalSection(&udpRecvMutex);
         return 0;
+    }
     int res = sizeof(sockaddr);
     if((res = recvfrom(sock, buf, dataLength, 0, (sockaddr *)addr, &res)) < 0) {
 #ifdef DEBUG
         std::cout << "Recv Error: " << WSAGetLastError() << endl;
 #endif
     }
+    LeaveCriticalSection(&udpRecvMutex);
     return res;
 }
 
 
-void ReliUDP::sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt) {
+void ReliUDP::sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt, int RTT) {
     EnterCriticalSection(&messageSeqIdMutex);
     uint32_t seqID = ST.getIPortSeq(&addr);
     LeaveCriticalSection(&messageSeqIdMutex);
@@ -238,7 +251,7 @@ void ReliUDP::sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char s
             ++threadNum;
         LeaveCriticalSection(&threadNumMutex);
     }
-    sendPara *para = new sendPara(this, dat, dataLength, seqID, addr, sendOpt);
+    sendPara *para = new sendPara(this, dat, dataLength, seqID, addr, sendOpt, RTT);
     if((sendOpt & SEND_BLOCK_CHECK) == SEND_BLOCK) {	//block send
         sendDataThread(para);
     }
@@ -293,12 +306,20 @@ unsigned __stdcall sendDataThread(LPVOID data) {
     bool flag = false;
     uint32_t expectedSize = 0;
     DWORD timer;
+    DWORD speedTimer;
+    DWORD sendSpeedRate = MaxSpeedRate;
+    DWORD sendStartTime = GetTickCount();
+    DWORD time;
+    DWORD rateBeginTime = 0;
+    int sendCnt = 0;
+    int responseCnt = 0;
     size_t fragIdCur = 0;
     while(1) {
         queue.clear();	//let me make it clear
         bool over = false;
         EnterCriticalSection(&godFather->sendStatMutex);
         queue = godFather->ST.getAll(&frame, &para->addr);	//check the send stat	get all un-responded frame
+        LeaveCriticalSection(&godFather->sendStatMutex);
         if(queue.empty()) {	//all clear
 #ifdef DEBUG
             cout << "[send complete: " << frame.messageSeqID << "]" << endl;
@@ -312,6 +333,7 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             over = true;
         }
         if(over) {
+            EnterCriticalSection(&godFather->sendStatMutex);
             godFather->ST.removeSeq(&frame, &para->addr);	//remove seq from SEND_STAT
             LeaveCriticalSection(&godFather->sendStatMutex);
             EnterCriticalSection(&godFather->sendCountMutex);
@@ -326,21 +348,29 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             delete data;
             return 0;
         }
-        LeaveCriticalSection(&godFather->sendStatMutex);
-        //responsive send
-        flag = (queue.size() < ExpectExceptionSize || prevSize - queue.size() >= expectedSize || checkTimeout(timer)); //wait for response until timeout
-        prevSize = queue.size();
-        if(!flag) {	//do not resend
-            Sleep(SkipWaitTime);
-            continue;
+
+        //flow control
+        time = GetTickCount() - sendStartTime; //time count from send start
+        if(time > para->RTT) { //after RTT
+            responseCnt = fragmentCount - queue.size();
+            if(sendSpeedRate > MinSpeedRate  && responseCnt < int(sendCnt * ExpectRate)) { //slow down
+                sendSpeedRate = max(MinSpeedRate, sendSpeedRate >> 1);
+                rateBeginTime = time;
+
+            }
+            else if(sendSpeedRate < MaxSpeedRate &&  time - rateBeginTime > 500 && responseCnt >= int(sendCnt * ExpectRate)) { //speed up
+                sendSpeedRate = min(MaxSpeedRate, sendSpeedRate << 1);
+                rateBeginTime = time;
+            }
         }
-        expectedSize = 0;
-        //send frames
+
+        //send data
         int SendSampleCount = SendSampleSize / FragmentSize + 1;
         int lastDataSize = dataLength - (fragmentCount - 1) * FragmentDataSize;
         int lastFrameSize = lastDataSize + FragmentHeaderSize;
+        sendCnt += SendSampleCount <= queue.size() ? SendSampleCount : queue.size();
+        speedTimer = GetTickCount() + 1 + 1000 * (SendSampleSize / double(sendSpeedRate));
         for(size_t i = 0; i < SendSampleCount && i < queue.size(); ++i) {
-            ++expectedSize;
             while(fragIdCur >= queue.size())	//mod
                 fragIdCur -= queue.size();
             frame.fragmentID = queue[fragIdCur];
@@ -366,9 +396,15 @@ unsigned __stdcall sendDataThread(LPVOID data) {
             LeaveCriticalSection(&godFather->resendCountMutex);
 #endif
         }
-        timer = GetTickCount() + ExpectTimeout;
-        //wait for next check
-        Sleep(TimeWait);
+        //speed control
+        time = GetTickCount();
+        if(time < speedTimer) {
+            time = speedTimer - time;
+            if(time > 1000) {
+                system("pause");
+            }
+            Sleep(time);
+        }
     }
 }
 

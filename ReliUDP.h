@@ -30,15 +30,17 @@ static const int FragmentSize = FragmentHeaderSize + FragmentDataSize;
 
 static const int MaxTestTimes = 32;				//32*50 = 1600 ms
 
-static const int TimeWait = 8 ;					//default 8
+static const int TimeWait = 0 ;					//default 8
 
 static const int SendSampleSize = 1024 * 24;	//default 24k
+static const int MaxSpeedRate = 8 * 1024 * 1024;	// B/s
+static const int MinSpeedRate = 128 * 1024;		// B/s
 
 static const int SendTimeout = 3000;			//default 3k ms
 static const int SendTimeoutFactor = 50;		//default 50  ms/frame
 static const int SendNoReceiverTimeout = int(1000 * double(CLOCKS_PER_SEC) / 1000.0);		//default 1 s
 
-static const double ExpectRate = 1; 			//default 100%
+static const double ExpectRate = .98; 			//default 100%
 static const int ExpectTimeout = 32;			//default 32 ms
 static const int SkipWaitTime = 4;
 static const int ExpectExceptionSize = 12;		//default 12
@@ -50,7 +52,8 @@ static const int RecvBUFWait = 50;				//default 50ms
 static const int FragmentTimeout = 3000;		//default 3k ms
 static const int FragmentTimeoutFactor = 2;		//default 2ms/frame
 
-static const int SelectTimeoutTime = 1;			//default 1s
+static const int SendSelectTimeoutTime = 10;
+static const int RecvSelectTimeoutTime = 500;			//default 500s
 
 #define FRAGMENT_DATA 73
 #define FRAGMENT_RESPONSE 81
@@ -402,7 +405,7 @@ public:
         while(it != indexSet.end()) {
             if(it->timeout(now)) {
 #ifdef DEBUG
-                cout << "[timeout:" << it->id << "]" << endl;
+                cout << "[timeout:" << it->ips.SeqID << "]" << endl;
 #endif
                 it = indexSet.erase(it);
             }
@@ -517,7 +520,7 @@ public:
     void clearCom();
     void resetCom(SOCKADDR_IN addr);
     int testRTT(SOCKADDR_IN addr);
-    void sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt = SEND_BLOCK);
+    void sendData(const char *dat, int dataLength, SOCKADDR_IN addr, char sendOpt = SEND_BLOCK, int RTT = 4);
     int recvData(char *buf, int dataLength, SOCKADDR_IN *addr);
     uint32_t getNextDataLength();
     static SOCKADDR_IN getAddr(string ip, int port);
@@ -569,6 +572,8 @@ private:
     CRITICAL_SECTION messageSeqIdMutex;
     CRITICAL_SECTION threadNumMutex;
     CRITICAL_SECTION recvStatMutex;
+    CRITICAL_SECTION udpSendMutex;
+    CRITICAL_SECTION udpRecvMutex;
 #ifdef RESEND_COUNT
     CRITICAL_SECTION resendCountMutex;
     uint32_t resendCount;
@@ -579,18 +584,20 @@ private:
 };
 
 typedef struct _sendThreadPara {
-    _sendThreadPara(ReliUDP *father, const char *d, uint32_t len, uint32_t id, SOCKADDR_IN add, char opt) {
+    _sendThreadPara(ReliUDP *father, const char *d, uint32_t len, uint32_t id, SOCKADDR_IN add, char opt, int rtt) {
         godFather = father;
         dat = d;
         dataLength = len;
         messageSeqId = id;
         sendOpt = opt;
         addr = add;
+        RTT = rtt;
     }
+    SOCKADDR_IN addr;
     ReliUDP *godFather;
     const char *dat;
     uint32_t dataLength;
+    int RTT;
     uint16_t messageSeqId;
-    SOCKADDR_IN addr;
     char sendOpt;
 } sendPara;
